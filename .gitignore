@@ -1,0 +1,14 @@
+clash_rule_engine_report.json
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+/name/
+/.venv/
+/venv/
+/env/
+
+# Editor
+/.vscode/

@@ -1,0 +1,1243 @@
+# ============================================================
+# CEC HACKATHON 2025 — BIM AUTO REROUTER v5.1 (RESILIENT)
+# Improvements aimed at reducing “SKIPPED” clashes:
+#   - Try multiple candidates per tier (not just the top 1)
+#   - Multi-step MoveElement scaling (x1/x2/x3) when base move fails
+#   - Allow limited re-moves per element (cap), instead of skipping forever
+#   - More robust connector disconnect + unpin before move
+#   - Better delta extraction + reroute uses segment candidates when available
+#   - Hardened duct/pipe reroute (system/level/size fallbacks)
+#
+# Paste into RevitPythonShell / pyRevit and run.
+# ============================================================
+
+import os
+import json
+from Autodesk.Revit.DB import *
+from Autodesk.Revit.DB.Mechanical import Duct
+
+try:
+    from Autodesk.Revit.DB.Plumbing import Pipe
+    HAS_PIPE = True
+except:
+    HAS_PIPE = False
+
+doc = __revit__.ActiveUIDocument.Document
+uidoc = __revit__.ActiveUIDocument
+
+FEET_TO_MM = 304.8
+MM_TO_FEET = 1.0 / 304.8
+
+# ============================================================
+# CONFIG  ← only edit this section
+# ============================================================
+
+JSON_PATH = r"C:\CEC_Hackathon\hero.json"
+
+MAX_CLASHES = 100
+MIN_SEVERITY = "HIGH"  # CRITICAL / HIGH / MEDIUM / LOW / INFO
+
+# Best-effort: attempt the least-bad candidate even if it introduces
+# some new clashes. Set to -999 to always attempt something.
+BEST_EFFORT_SCORE_THRESHOLD = -999
+
+# Ceiling void limit mm — moves raising an element beyond this are skipped
+CEILING_VOID_LIMIT_MM = 800
+
+# If many clashes reference the same element, allow a couple moves
+# (instead of skipping all later clashes for that EID).
+MAX_MOVES_PER_ELEMENT = 2
+
+# How hard we try per clash
+MAX_T1_CANDIDATES_TO_TRY = 3
+MAX_T2_CANDIDATES_TO_TRY = 6
+MAX_T3_CANDIDATES_TO_TRY = 3
+
+MOVE_MULTIPLIERS = [1, 2, 3]       # scale up dx/dy/dz when MoveElement fails
+REROUTE_MULTIPLIERS = [1, 2]       # scale up offsets for segment reroute
+
+# Connectivity / “floating” safeguards
+#  - When True: attempt move WITHOUT disconnect first (keeps network connected when possible)
+#  - Then retry with disconnect only if needed.
+DISCONNECT_ONLY_IF_NEEDED = True
+
+# Print connector stats in resolved messages (helps you spot floating ends quickly)
+PRINT_CONNECTIVITY_STATS = True
+
+# Best-effort: try to place fittings / connect connectors during reroute
+AUTO_CONNECT_REROUTE_SEGMENTS = True
+AUTO_RECONNECT_REROUTE_TO_NEIGHBORS = True
+
+# Connector matching tolerance for “near point” lookup
+CONNECTOR_MATCH_TOLERANCE_MM = 5.0
+
+
+# ============================================================
+# SEVERITY ORDER
+# ============================================================
+
+SEV_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
+
+# Track successful operations per EID to avoid endless thrash
+_move_counts = {}
+
+
+# ============================================================
+# SILENT FAILURE HANDLER
+# ============================================================
+
+class SilentFailureHandler(IFailuresPreprocessor):
+    def PreprocessFailures(self, failuresAccessor):
+        for f in failuresAccessor.GetFailureMessages():
+            try:
+                sev = f.GetSeverity()
+                if sev == FailureSeverity.Warning:
+                    failuresAccessor.DeleteWarning(f)
+                else:
+                    # Best-effort: some failures can be auto-resolved
+                    failuresAccessor.ResolveFailure(f)
+            except:
+                try:
+                    failuresAccessor.DeleteWarning(f)
+                except:
+                    pass
+        return FailureProcessingResult.Continue
+
+
+# ============================================================
+# UTILS
+# ============================================================
+
+def as_float(val, default=0.0):
+    try:
+        return float(val)
+    except:
+        return default
+
+
+def normalize_strategy(s):
+    try:
+        return str(s or "").strip().lower()
+    except:
+        return ""
+
+
+def is_valid(element):
+    try:
+        return element is not None and element.IsValidObject
+    except:
+        try:
+            _ = element.Id
+            return True
+        except:
+            return False
+
+
+def get_element_anchor(element):
+    """Best-effort point to check if an element moved."""
+    if not is_valid(element):
+        return None
+
+    # Prefer Location (works for MEPCurve + many instances)
+    try:
+        loc = element.Location
+        if loc:
+            try:
+                p = loc.Point
+                if p:
+                    return p
+            except:
+                pass
+            try:
+                c = loc.Curve
+                if c:
+                    return c.GetEndPoint(0)
+            except:
+                pass
+    except:
+        pass
+
+    # Fallback: bounding box
+    try:
+        bb = element.get_BoundingBox(None)
+        if bb:
+            return bb.Min
+    except:
+        pass
+    return None
+
+
+def get_connector_manager(element):
+    try:
+        cm = element.ConnectorManager
+        if cm:
+            return cm
+    except:
+        pass
+    try:
+        mep = element.MEPModel
+        if mep:
+            cm = mep.ConnectorManager
+            if cm:
+                return cm
+    except:
+        pass
+    return None
+
+
+def iter_connectors(element):
+    cm = get_connector_manager(element)
+    if cm is None:
+        return []
+    out = []
+    try:
+        for c in cm.Connectors:
+            out.append(c)
+    except:
+        pass
+    return out
+
+
+def connector_stats(element):
+    """Return (total, connected, open) for the element's connectors (best-effort)."""
+    total = connected = open_ = 0
+    for c in iter_connectors(element):
+        try:
+            if c is None:
+                continue
+            total += 1
+            if c.IsConnected:
+                connected += 1
+            else:
+                open_ += 1
+        except:
+            pass
+    return total, connected, open_
+
+
+def find_connector_near_point(element, point_xyz, tol_mm=None):
+    if not is_valid(element) or point_xyz is None:
+        return None
+
+    tol_mm = CONNECTOR_MATCH_TOLERANCE_MM if tol_mm is None else tol_mm
+    tol = as_float(tol_mm, CONNECTOR_MATCH_TOLERANCE_MM) * MM_TO_FEET
+
+    best = None
+    best_dist = None
+    for c in iter_connectors(element):
+        try:
+            if c is None:
+                continue
+            d = c.Origin.DistanceTo(point_xyz)
+            if best is None or d < best_dist:
+                best = c
+                best_dist = d
+        except:
+            continue
+
+    if best is None:
+        return None
+    try:
+        if best_dist is not None and best_dist <= tol:
+            return best
+    except:
+        pass
+    return None
+
+
+def unique_ints(seq):
+    out = []
+    seen = set()
+    for x in seq or []:
+        try:
+            xi = int(x)
+        except:
+            continue
+        if xi in seen:
+            continue
+        seen.add(xi)
+        out.append(xi)
+    return out
+
+
+def capture_neighbor_ids_at_point(element, point_xyz):
+    """Capture IDs of elements connected to this element at the connector nearest point_xyz."""
+    ids = []
+    c = find_connector_near_point(element, point_xyz)
+    if c is None:
+        return ids
+    try:
+        for ref in c.AllRefs:
+            try:
+                if ref is None:
+                    continue
+                owner = ref.Owner
+                if owner is None:
+                    continue
+                if owner.Id.IntegerValue == element.Id.IntegerValue:
+                    continue
+                ids.append(owner.Id.IntegerValue)
+            except:
+                pass
+    except:
+        pass
+    return unique_ints(ids)
+
+
+def try_connect_connectors(conn1, conn2):
+    """Best-effort connect two connectors by creating a fitting or direct connect."""
+    if conn1 is None or conn2 is None:
+        return False
+
+    # Already connected?
+    try:
+        if conn1.IsConnected:
+            for r in conn1.AllRefs:
+                try:
+                    if r is conn2:
+                        return True
+                except:
+                    pass
+    except:
+        pass
+
+    creator = None
+    try:
+        creator = doc.Create
+    except:
+        creator = None
+
+    # Try common fitting creations (method availability varies by Revit version)
+    for meth in ["NewUnionFitting", "NewElbowFitting", "NewTransitionFitting"]:
+        try:
+            if creator is None:
+                break
+            fn = getattr(creator, meth, None)
+            if fn is None:
+                continue
+            fi = fn(conn1, conn2)
+            if fi:
+                return True
+        except:
+            pass
+
+    # Fallback: direct connector connect
+    try:
+        conn1.ConnectTo(conn2)
+        return True
+    except:
+        return False
+
+
+def connect_elements_at_point(elem_a, elem_b, point_xyz):
+    """Connect the nearest connector of elem_a and elem_b at point_xyz."""
+    ca = find_connector_near_point(elem_a, point_xyz)
+    cb = find_connector_near_point(elem_b, point_xyz)
+    return try_connect_connectors(ca, cb)
+
+
+def disconnect_all(element):
+    """Disconnect all connectors so MoveElement is allowed."""
+    cm = get_connector_manager(element)
+    if cm is None:
+        return
+    try:
+        for conn in cm.Connectors:
+            try:
+                if conn and conn.IsConnected:
+                    refs = list(conn.AllRefs)
+                    for ref in refs:
+                        try:
+                            conn.DisconnectFrom(ref)
+                        except:
+                            pass
+            except:
+                pass
+    except:
+        pass
+
+
+def ceiling_void_ok(dz_mm):
+    if dz_mm <= 0:
+        return True
+    return dz_mm <= CEILING_VOID_LIMIT_MM
+
+
+def is_segment_strategy(strategy_name):
+    s = normalize_strategy(strategy_name)
+    if not s:
+        return False
+    return ("segment" in s) or ("reroute" in s)
+
+
+def candidate_score(c):
+    try:
+        return as_float(c.get("score", -9999), -9999)
+    except:
+        return -9999
+
+
+def get_candidates(resolution_dict):
+    # tolerate schema variations
+    c = resolution_dict.get("all_candidates", None)
+    if isinstance(c, list):
+        return c
+    c = resolution_dict.get("candidates", None)
+    if isinstance(c, list):
+        return c
+    return []
+
+
+def pick_candidates(candidates, require_clash_free=True,
+                    score_threshold=-999, include_segment=False,
+                    max_to_try=3):
+    eligible = []
+    for c in candidates or []:
+        if not isinstance(c, dict):
+            continue
+        s = c.get("strategy", "")
+        if (not include_segment) and is_segment_strategy(s):
+            continue
+        if require_clash_free:
+            if not c.get("is_clash_free", False):
+                continue
+        else:
+            if candidate_score(c) < score_threshold:
+                continue
+        eligible.append(c)
+
+    eligible.sort(key=lambda x: candidate_score(x), reverse=True)
+    return eligible[:max_to_try]
+
+
+def get_delta(candidate, fallback_strategy="", fallback_offset=300.0):
+    """Extract dx/dy/dz in mm from a candidate dict (robust to schema drift)."""
+    dx = dy = dz = 0.0
+
+    # 1) Preferred: delta dict
+    if isinstance(candidate, dict):
+        delta = (candidate.get("delta_mm") or candidate.get("delta") or
+                 candidate.get("movement_mm") or {})
+        if isinstance(delta, dict):
+            dx = as_float(delta.get("x", delta.get("dx", 0)), 0)
+            dy = as_float(delta.get("y", delta.get("dy", 0)), 0)
+            dz = as_float(delta.get("z", delta.get("dz", 0)), 0)
+        elif isinstance(delta, (list, tuple)) and len(delta) == 3:
+            dx = as_float(delta[0], 0)
+            dy = as_float(delta[1], 0)
+            dz = as_float(delta[2], 0)
+        else:
+            dx = as_float(candidate.get("dx_mm", 0), 0)
+            dy = as_float(candidate.get("dy_mm", 0), 0)
+            dz = as_float(candidate.get("dz_mm", 0), 0)
+
+    # 2) If missing, derive from a strategy name
+    if dx == 0 and dy == 0 and dz == 0:
+        strat = fallback_strategy
+        off = fallback_offset
+        if isinstance(candidate, dict):
+            strat = candidate.get("strategy", strat)
+            off = as_float(candidate.get("best_offset_mm", candidate.get("offset_mm", off)), off)
+
+        s = normalize_strategy(strat)
+        o = as_float(off, 300.0)
+        if "raise_z" in s or "raise" in s or "up" in s:
+            dz = abs(o)
+        elif "lower_z" in s or "lower" in s or "down" in s:
+            dz = -abs(o)
+        elif "pos_x" in s or "x+" in s:
+            dx = abs(o)
+        elif "neg_x" in s or "x-" in s:
+            dx = -abs(o)
+        elif "pos_y" in s or "y+" in s:
+            dy = abs(o)
+        elif "neg_y" in s or "y-" in s:
+            dy = -abs(o)
+        else:
+            # safe default: small Z raise
+            dz = abs(o) if o else 300.0
+
+    return dx, dy, dz
+
+
+# ============================================================
+# STRATEGY 1 — Offset parameter (best for pure-Z)
+# ============================================================
+
+def try_offset_param(element, dz_mm):
+    if not is_valid(element):
+        return False, "Element not valid"
+    if dz_mm == 0:
+        return False, "dz=0"
+
+    param_names = [
+        "Middle Elevation", "Offset",
+        "Start Middle Elevation", "End Middle Elevation",
+        "Reference Level Offset", "Elevation from Level",
+    ]
+    for pname in param_names:
+        try:
+            p = element.LookupParameter(pname)
+            if p is None or p.IsReadOnly:
+                continue
+
+            original = p.AsDouble()
+            new_val = original + (dz_mm * MM_TO_FEET)
+
+            t = Transaction(doc, "OffsetParam:" + pname)
+            try:
+                t.Start()
+                opts = t.GetFailureHandlingOptions()
+                opts.SetFailuresPreprocessor(SilentFailureHandler())
+                t.SetFailureHandlingOptions(opts)
+                p.Set(new_val)
+                t.Commit()
+            except:
+                try:
+                    t.RollBack()
+                except:
+                    pass
+                continue
+
+            # Verify
+            try:
+                if abs(p.AsDouble() - new_val) < 0.001:
+                    return True, "OffsetParam[{0}] {1:.0f}->{2:.0f}mm".format(
+                        pname, original * FEET_TO_MM, new_val * FEET_TO_MM)
+            except:
+                return True, "OffsetParam[{0}] set".format(pname)
+        except:
+            continue
+
+    return False, "No writable offset param"
+
+
+# ============================================================
+# STRATEGY 2 — MoveElement (disconnect + unpin)
+# ============================================================
+
+def try_move_element(element, dx_mm, dy_mm, dz_mm, do_disconnect=False):
+    if not is_valid(element):
+        return False, "Element no longer valid"
+
+    total_before = connected_before = open_before = None
+    try:
+        total_before, connected_before, open_before = connector_stats(element)
+    except:
+        pass
+
+    before = get_element_anchor(element)
+    move_vec = XYZ(dx_mm * MM_TO_FEET, dy_mm * MM_TO_FEET, dz_mm * MM_TO_FEET)
+
+    t = Transaction(doc, "MoveElement")
+    try:
+        t.Start()
+        opts = t.GetFailureHandlingOptions()
+        opts.SetFailuresPreprocessor(SilentFailureHandler())
+        t.SetFailureHandlingOptions(opts)
+
+        # Unpin if needed (pinned elements commonly refuse to move)
+        was_pinned = False
+        try:
+            was_pinned = bool(getattr(element, "Pinned", False))
+            if was_pinned:
+                element.Pinned = False
+        except:
+            was_pinned = False
+
+        if do_disconnect:
+            disconnect_all(element)
+        ElementTransformUtils.MoveElement(doc, element.Id, move_vec)
+
+        # Restore pin state (keep model intent)
+        try:
+            if was_pinned:
+                element.Pinned = True
+        except:
+            pass
+
+        t.Commit()
+
+        # Verify the element actually moved
+        after = get_element_anchor(element)
+        if before and after:
+            moved = (abs(after.X - before.X) > 0.001 or
+                     abs(after.Y - before.Y) > 0.001 or
+                     abs(after.Z - before.Z) > 0.001)
+            if moved:
+                msg = "MoveElement dx={0:.0f} dy={1:.0f} dz={2:.0f}mm".format(dx_mm, dy_mm, dz_mm)
+                if do_disconnect:
+                    msg += " (after disconnect)"
+                if PRINT_CONNECTIVITY_STATS:
+                    try:
+                        tb, cb, ob = connector_stats(element)
+                        msg += " | conn {0}/{1} open={2}".format(cb, tb, ob)
+                        if open_before is not None and ob > open_before:
+                            msg += " [OPEN++ WARNING]"
+                    except:
+                        pass
+                return True, msg
+            return False, "Position unchanged after move"
+
+        # Could not verify position; treat as success if no exception
+        msg = "MoveElement dx={0:.0f} dy={1:.0f} dz={2:.0f}mm (pos unverified)".format(dx_mm, dy_mm, dz_mm)
+        if do_disconnect:
+            msg += " (after disconnect)"
+        if PRINT_CONNECTIVITY_STATS:
+            try:
+                tb, cb, ob = connector_stats(element)
+                msg += " | conn {0}/{1} open={2}".format(cb, tb, ob)
+                if open_before is not None and ob > open_before:
+                    msg += " [OPEN++ WARNING]"
+            except:
+                pass
+        return True, msg
+
+    except Exception as e:
+        try:
+            t.RollBack()
+        except:
+            pass
+        return False, "MoveElement ex: " + str(e)[:120]
+
+
+def attempt_move_with_multipliers(element, dx_mm, dy_mm, dz_mm, prefer_offset_param=True):
+    """Try OffsetParam (if pure-Z) then MoveElement with scaled magnitudes."""
+    if dx_mm == 0 and dy_mm == 0 and dz_mm == 0:
+        return False, "Zero delta"
+
+    # Offset param is cleanest for pure Z
+    if prefer_offset_param and dx_mm == 0 and dy_mm == 0 and dz_mm != 0:
+        if ceiling_void_ok(dz_mm):
+            ok, msg = try_offset_param(element, dz_mm)
+            if ok:
+                return True, msg
+
+    last_msg = ""
+    for m in MOVE_MULTIPLIERS:
+        ddx = dx_mm * m
+        ddy = dy_mm * m
+        ddz = dz_mm * m
+        if not ceiling_void_ok(ddz):
+            continue
+
+        # Attempt 1: move while still connected (preferred)
+        if DISCONNECT_ONLY_IF_NEEDED:
+            ok, msg = try_move_element(element, ddx, ddy, ddz, do_disconnect=False)
+            last_msg = msg
+            if ok:
+                if m != 1:
+                    return True, msg + " (x{0})".format(m)
+                return True, msg
+
+            # Attempt 2: disconnect then move
+            ok, msg = try_move_element(element, ddx, ddy, ddz, do_disconnect=True)
+            last_msg = msg
+            if ok:
+                if m != 1:
+                    return True, msg + " (x{0})".format(m)
+                return True, msg
+        else:
+            ok, msg = try_move_element(element, ddx, ddy, ddz, do_disconnect=True)
+            last_msg = msg
+            if ok:
+                if m != 1:
+                    return True, msg + " (x{0})".format(m)
+                return True, msg
+
+    return False, last_msg or "Move attempts failed"
+
+
+# ============================================================
+# STRATEGY 3a — Pipe segment reroute (3-leg detour)
+# ============================================================
+
+def get_level_id_for_curve(element):
+    # Try ReferenceLevel first
+    try:
+        lvl = getattr(element, "ReferenceLevel", None)
+        if lvl:
+            return lvl.Id
+    except:
+        pass
+    # Fallback: common start level parameters
+    for bip in [BuiltInParameter.RBS_START_LEVEL_PARAM,
+                BuiltInParameter.RBS_REFERENCE_LEVEL_PARAM,
+                BuiltInParameter.INSTANCE_REFERENCE_LEVEL_PARAM]:
+        try:
+            p = element.get_Parameter(bip)
+            if p:
+                eid = p.AsElementId()
+                if eid and eid.IntegerValue > 0:
+                    return eid
+        except:
+            pass
+    return ElementId.InvalidElementId
+
+
+def get_system_type_id(element, is_pipe):
+    bip = (BuiltInParameter.RBS_PIPING_SYSTEM_TYPE_PARAM
+           if is_pipe else BuiltInParameter.RBS_DUCT_SYSTEM_TYPE_PARAM)
+    try:
+        p = element.get_Parameter(bip)
+        if p:
+            eid = p.AsElementId()
+            if eid and eid.IntegerValue > 0:
+                return eid
+    except:
+        pass
+    # Fallback: MEPSystem (may be None)
+    try:
+        sys = getattr(element, "MEPSystem", None)
+        if sys:
+            return sys.GetTypeId()
+    except:
+        pass
+    return ElementId.InvalidElementId
+
+
+def capture_curve_size_params(src):
+    """Capture basic size parameters (diameter/width/height) from a curve element."""
+    vals = []
+    if not is_valid(src):
+        return vals
+
+    bips = [
+        BuiltInParameter.RBS_PIPE_DIAMETER_PARAM,
+        BuiltInParameter.RBS_CURVE_DIAMETER_PARAM,
+        BuiltInParameter.RBS_CURVE_WIDTH_PARAM,
+        BuiltInParameter.RBS_CURVE_HEIGHT_PARAM,
+    ]
+    for bip in bips:
+        try:
+            p = src.get_Parameter(bip)
+            if p is None:
+                continue
+            v = p.AsDouble()
+            if v and v > 0:
+                vals.append((bip, v))
+        except:
+            pass
+    return vals
+
+
+def apply_curve_size_params(dst, vals):
+    """Apply captured size parameters to a newly created curve element."""
+    if not is_valid(dst):
+        return
+    for bip, v in (vals or []):
+        try:
+            p = dst.get_Parameter(bip)
+            if p is None or p.IsReadOnly:
+                continue
+            p.Set(v)
+        except:
+            pass
+
+
+def try_pipe_reroute(element, dx_mm, dy_mm, dz_mm):
+    if not HAS_PIPE or not isinstance(element, Pipe):
+        return False, "Not a Pipe"
+
+    if not is_valid(element):
+        return False, "Pipe not valid"
+
+    try:
+        curve = element.Location.Curve
+        p1 = curve.GetEndPoint(0)
+        p4 = curve.GetEndPoint(1)
+        offset = XYZ(dx_mm * MM_TO_FEET, dy_mm * MM_TO_FEET, dz_mm * MM_TO_FEET)
+        p2, p3 = p1 + offset, p4 + offset
+
+        # Capture neighbors at original ends BEFORE delete
+        neighbors_start = capture_neighbor_ids_at_point(element, p1) if AUTO_RECONNECT_REROUTE_TO_NEIGHBORS else []
+        neighbors_end = capture_neighbor_ids_at_point(element, p4) if AUTO_RECONNECT_REROUTE_TO_NEIGHBORS else []
+
+        sys_type_id = get_system_type_id(element, is_pipe=True)
+        type_id = element.PipeType.Id
+        level_id = get_level_id_for_curve(element)
+
+        # Cache size from original before deleting (element becomes invalid after Delete)
+        size_vals = capture_curve_size_params(element)
+
+        t = Transaction(doc, "PipeSegmentReroute")
+        t.Start()
+        opts = t.GetFailureHandlingOptions()
+        opts.SetFailuresPreprocessor(SilentFailureHandler())
+        t.SetFailureHandlingOptions(opts)
+
+        doc.Delete(element.Id)
+
+        s1 = Pipe.Create(doc, sys_type_id, type_id, level_id, p1, p2)
+        s2 = Pipe.Create(doc, sys_type_id, type_id, level_id, p2, p3)
+        s3 = Pipe.Create(doc, sys_type_id, type_id, level_id, p3, p4)
+
+        # Apply cached size where possible
+        try:
+            if s1: apply_curve_size_params(s1, size_vals)
+            if s2: apply_curve_size_params(s2, size_vals)
+            if s3: apply_curve_size_params(s3, size_vals)
+        except:
+            pass
+
+        # Best-effort: connect new segments together and back to original neighbors
+        seg_ok = True
+        if AUTO_CONNECT_REROUTE_SEGMENTS:
+            try:
+                if not connect_elements_at_point(s1, s2, p2):
+                    seg_ok = False
+                if not connect_elements_at_point(s2, s3, p3):
+                    seg_ok = False
+            except:
+                seg_ok = False
+
+        end_ok = True
+        if AUTO_RECONNECT_REROUTE_TO_NEIGHBORS:
+            try:
+                if neighbors_start:
+                    ok_any = False
+                    for nid in neighbors_start:
+                        ne = doc.GetElement(ElementId(int(nid)))
+                        if not is_valid(ne):
+                            continue
+                        if connect_elements_at_point(s1, ne, p1):
+                            ok_any = True
+                            break
+                    if not ok_any:
+                        end_ok = False
+                if neighbors_end:
+                    ok_any = False
+                    for nid in neighbors_end:
+                        ne = doc.GetElement(ElementId(int(nid)))
+                        if not is_valid(ne):
+                            continue
+                        if connect_elements_at_point(s3, ne, p4):
+                            ok_any = True
+                            break
+                    if not ok_any:
+                        end_ok = False
+            except:
+                end_ok = False
+
+        t.Commit()
+        msg = "PipeReroute 3-leg dx={0:.0f} dy={1:.0f} dz={2:.0f}mm".format(dx_mm, dy_mm, dz_mm)
+        try:
+            msg += " | new=[{0},{1},{2}]".format(s1.Id.IntegerValue, s2.Id.IntegerValue, s3.Id.IntegerValue)
+        except:
+            pass
+        if AUTO_CONNECT_REROUTE_SEGMENTS and not seg_ok:
+            msg += " [SEG-CONNECT WARNING]"
+        if AUTO_RECONNECT_REROUTE_TO_NEIGHBORS and not end_ok:
+            msg += " [END-CONNECT WARNING]"
+        return True, msg
+
+    except Exception as e:
+        try:
+            t.RollBack()
+        except:
+            pass
+        return False, "PipeReroute ex: " + str(e)[:120]
+
+
+# ============================================================
+# STRATEGY 3b — Duct segment reroute (3-leg detour)
+# ============================================================
+
+def try_duct_reroute(element, dx_mm, dy_mm, dz_mm):
+    if not isinstance(element, Duct):
+        return False, "Not a Duct"
+
+    if not is_valid(element):
+        return False, "Duct not valid"
+
+    try:
+        curve = element.Location.Curve
+        p1 = curve.GetEndPoint(0)
+        p4 = curve.GetEndPoint(1)
+        offset = XYZ(dx_mm * MM_TO_FEET, dy_mm * MM_TO_FEET, dz_mm * MM_TO_FEET)
+        p2, p3 = p1 + offset, p4 + offset
+
+        # Capture neighbors at original ends BEFORE delete
+        neighbors_start = capture_neighbor_ids_at_point(element, p1) if AUTO_RECONNECT_REROUTE_TO_NEIGHBORS else []
+        neighbors_end = capture_neighbor_ids_at_point(element, p4) if AUTO_RECONNECT_REROUTE_TO_NEIGHBORS else []
+
+        sys_type_id = get_system_type_id(element, is_pipe=False)
+        type_id = element.DuctType.Id
+        level_id = get_level_id_for_curve(element)
+
+        # Cache size from original before deleting
+        size_vals = capture_curve_size_params(element)
+
+        t = Transaction(doc, "DuctSegmentReroute")
+        t.Start()
+        opts = t.GetFailureHandlingOptions()
+        opts.SetFailuresPreprocessor(SilentFailureHandler())
+        t.SetFailureHandlingOptions(opts)
+
+        doc.Delete(element.Id)
+
+        s1 = Duct.Create(doc, sys_type_id, type_id, level_id, p1, p2)
+        s2 = Duct.Create(doc, sys_type_id, type_id, level_id, p2, p3)
+        s3 = Duct.Create(doc, sys_type_id, type_id, level_id, p3, p4)
+
+        # Apply cached size where possible
+        try:
+            if s1: apply_curve_size_params(s1, size_vals)
+            if s2: apply_curve_size_params(s2, size_vals)
+            if s3: apply_curve_size_params(s3, size_vals)
+        except:
+            pass
+
+        # Best-effort: connect new segments together and back to original neighbors
+        seg_ok = True
+        if AUTO_CONNECT_REROUTE_SEGMENTS:
+            try:
+                if not connect_elements_at_point(s1, s2, p2):
+                    seg_ok = False
+                if not connect_elements_at_point(s2, s3, p3):
+                    seg_ok = False
+            except:
+                seg_ok = False
+
+        end_ok = True
+        if AUTO_RECONNECT_REROUTE_TO_NEIGHBORS:
+            try:
+                if neighbors_start:
+                    ok_any = False
+                    for nid in neighbors_start:
+                        ne = doc.GetElement(ElementId(int(nid)))
+                        if not is_valid(ne):
+                            continue
+                        if connect_elements_at_point(s1, ne, p1):
+                            ok_any = True
+                            break
+                    if not ok_any:
+                        end_ok = False
+                if neighbors_end:
+                    ok_any = False
+                    for nid in neighbors_end:
+                        ne = doc.GetElement(ElementId(int(nid)))
+                        if not is_valid(ne):
+                            continue
+                        if connect_elements_at_point(s3, ne, p4):
+                            ok_any = True
+                            break
+                    if not ok_any:
+                        end_ok = False
+            except:
+                end_ok = False
+
+        t.Commit()
+        msg = "DuctReroute 3-leg dx={0:.0f} dy={1:.0f} dz={2:.0f}mm".format(dx_mm, dy_mm, dz_mm)
+        try:
+            msg += " | new=[{0},{1},{2}]".format(s1.Id.IntegerValue, s2.Id.IntegerValue, s3.Id.IntegerValue)
+        except:
+            pass
+        if AUTO_CONNECT_REROUTE_SEGMENTS and not seg_ok:
+            msg += " [SEG-CONNECT WARNING]"
+        if AUTO_RECONNECT_REROUTE_TO_NEIGHBORS and not end_ok:
+            msg += " [END-CONNECT WARNING]"
+        return True, msg
+
+    except Exception as e:
+        try:
+            t.RollBack()
+        except:
+            pass
+        return False, "DuctReroute ex: " + str(e)[:120]
+
+
+# ============================================================
+# APPLY ONE CLASH — FULL CASCADE
+# ============================================================
+
+def apply_resolution(clash):
+    """Full 3-tier strategy cascade. Returns (success, tier_label, message)."""
+    res = clash.get("resolution", {}) or {}
+    candidates = get_candidates(res)
+
+    eid_str = str(res.get("element_to_reroute", "") or "").strip()
+    best_strat = res.get("best_strategy", "")
+    best_off = as_float(res.get("best_offset_mm", 300), 300)
+
+    if not eid_str:
+        return False, "-", "No element_to_reroute"
+
+    # Per-element move cap to avoid thrash, but not skip forever
+    count = _move_counts.get(eid_str, 0)
+    if count >= MAX_MOVES_PER_ELEMENT:
+        return False, "-", "EID {0} reached move cap ({1})".format(eid_str, MAX_MOVES_PER_ELEMENT)
+
+    try:
+        element = doc.GetElement(ElementId(int(eid_str)))
+    except:
+        return False, "-", "Invalid EID: " + str(eid_str)
+
+    if not is_valid(element):
+        return False, "-", "Element {0} not valid/found".format(eid_str)
+
+    # -----------------------------------------------------------
+    # TIER 1 — Clash-free candidates (try a few)
+    # -----------------------------------------------------------
+    t1 = pick_candidates(candidates, require_clash_free=True,
+                         score_threshold=BEST_EFFORT_SCORE_THRESHOLD,
+                         include_segment=False,
+                         max_to_try=MAX_T1_CANDIDATES_TO_TRY)
+
+    for cand in t1:
+        strat = cand.get("strategy", "")
+        dx, dy, dz = get_delta(cand, best_strat, best_off)
+        if dx == 0 and dy == 0 and dz == 0:
+            continue
+
+        ok, msg = attempt_move_with_multipliers(element, dx, dy, dz, prefer_offset_param=True)
+        if ok:
+            _move_counts[eid_str] = count + 1
+            if "OffsetParam[" in msg:
+                return True, "T1-OffsetParam", "[{0}] {1}".format(strat, msg)
+            return True, "T1-MoveElement", "[{0}] {1}".format(strat, msg)
+
+        # Re-fetch in case the element became stale
+        try:
+            element = doc.GetElement(ElementId(int(eid_str)))
+        except:
+            element = None
+        if not is_valid(element):
+            return False, "-", "Element became invalid during T1"
+
+    # -----------------------------------------------------------
+    # TIER 2 — Best-effort (least-bad) candidates (try a few)
+    # -----------------------------------------------------------
+    t2 = pick_candidates(candidates, require_clash_free=False,
+                         score_threshold=BEST_EFFORT_SCORE_THRESHOLD,
+                         include_segment=False,
+                         max_to_try=MAX_T2_CANDIDATES_TO_TRY)
+
+    for cand in t2:
+        strat = cand.get("strategy", "")
+        dx, dy, dz = get_delta(cand, best_strat, best_off)
+        if dx == 0 and dy == 0 and dz == 0:
+            continue
+
+        score = cand.get("score", "?")
+        n_new = cand.get("new_clashes_count", "?")
+
+        ok, msg = attempt_move_with_multipliers(element, dx, dy, dz, prefer_offset_param=True)
+        if ok:
+            _move_counts[eid_str] = count + 1
+            return True, "T2-BestEffort", "[{0}] score={1} +{2}new | {3}".format(strat, score, n_new, msg)
+
+        try:
+            element = doc.GetElement(ElementId(int(eid_str)))
+        except:
+            element = None
+        if not is_valid(element):
+            return False, "-", "Element became invalid during T2"
+
+    # If there were no usable candidates at all, attempt a direct fallback move
+    if not t1 and not t2:
+        dx, dy, dz = get_delta(None, best_strat, best_off)
+        if dx != 0 or dy != 0 or dz != 0:
+            ok, msg = attempt_move_with_multipliers(element, dx, dy, dz, prefer_offset_param=True)
+            if ok:
+                _move_counts[eid_str] = count + 1
+                return True, "T2-BestEffort", "[fallback:{0}] {1}".format(best_strat, msg)
+
+    # -----------------------------------------------------------
+    # TIER 3 — Segment reroute (Duct/Pipe) (try segment candidates first)
+    # -----------------------------------------------------------
+    try:
+        element = doc.GetElement(ElementId(int(eid_str)))
+    except:
+        element = None
+    if not is_valid(element):
+        return False, "-", "Element became invalid before T3"
+
+    t3_seg = pick_candidates(candidates, require_clash_free=False,
+                             score_threshold=BEST_EFFORT_SCORE_THRESHOLD,
+                             include_segment=True,
+                             max_to_try=MAX_T3_CANDIDATES_TO_TRY)
+
+    # Add one fallback at the end
+    if not t3_seg:
+        t3_seg = [None]
+    else:
+        t3_seg.append(None)
+
+    for cand in t3_seg:
+        dx, dy, dz = get_delta(cand, best_strat, best_off)
+        if dx == 0 and dy == 0 and dz == 0:
+            continue
+
+        for m in REROUTE_MULTIPLIERS:
+            ddx = dx * m
+            ddy = dy * m
+            ddz = dz * m
+            if not ceiling_void_ok(ddz):
+                continue
+
+            try:
+                element = doc.GetElement(ElementId(int(eid_str)))
+            except:
+                element = None
+            if not is_valid(element):
+                return False, "-", "Element became invalid during T3"
+
+            ok, msg = try_duct_reroute(element, ddx, ddy, ddz)
+            if ok:
+                _move_counts[eid_str] = count + 1
+                return True, "T3-DuctReroute", msg
+
+            ok, msg = try_pipe_reroute(element, ddx, ddy, ddz)
+            if ok:
+                _move_counts[eid_str] = count + 1
+                return True, "T3-PipeReroute", msg
+
+    return False, "-", "All tiers exhausted for EID " + str(eid_str)
+
+
+# ============================================================
+# MAIN
+# ============================================================
+
+def run():
+    global _move_counts
+    _move_counts = {}
+
+    print("=" * 65)
+    print("  CEC HACKATHON 2025 — BIM AUTO REROUTER v5.1 (RESILIENT)")
+    print("=" * 65)
+    print("JSON     : " + JSON_PATH)
+    print("Max      : {0}  |  Min severity: {1}".format(MAX_CLASHES, MIN_SEVERITY))
+    print("Move cap : {0} per element".format(MAX_MOVES_PER_ELEMENT))
+    print("-" * 65)
+
+    if not os.path.exists(JSON_PATH):
+        print("ERROR: JSON not found — " + JSON_PATH)
+        return
+
+    with open(JSON_PATH, "r") as f:
+        data = json.load(f)
+
+    all_clashes = []
+    source_key = None
+    if isinstance(data, list):
+        all_clashes = data
+        source_key = "<list>"
+    elif isinstance(data, dict):
+        for k in ("classified_clashes", "clashes_scored", "clashes", "items"):
+            v = data.get(k)
+            if isinstance(v, list):
+                all_clashes = v
+                source_key = k
+                break
+
+    if source_key is None:
+        print("ERROR: Unrecognized JSON format. Expected a list or a dict with one of: classified_clashes / clashes_scored / clashes")
+        return
+
+    print("Total in JSON           : " + str(len(all_clashes)) + "  (from " + str(source_key) + ")")
+
+    min_idx = SEV_ORDER.get(MIN_SEVERITY, 4)
+    filtered = [c for c in all_clashes
+                if SEV_ORDER.get(c.get("severity", "INFO"), 4) <= min_idx]
+    print("After severity filter   : " + str(len(filtered)))
+
+    filtered.sort(key=lambda c: (
+        SEV_ORDER.get(c.get("severity", "INFO"), 4),
+        -int(c.get("priority_score", 0))
+    ))
+
+    batch = filtered[:MAX_CLASHES]
+    print("Processing              : " + str(len(batch)))
+    print("=" * 65)
+
+    tier_counts = {
+        "T1-OffsetParam": 0, "T1-MoveElement": 0,
+        "T2-BestEffort": 0,
+        "T3-DuctReroute": 0, "T3-PipeReroute": 0,
+    }
+    resolved = []
+    skipped = []
+
+    for i, clash in enumerate(batch):
+        cid = clash.get("clash_id", "?")
+        sev = clash.get("severity", "?")
+        pair = clash.get("clash_pair_label", "?")
+        grid = clash.get("grid_location", "?")
+        pen = clash.get("penetration_mm", 0)
+        resolution = clash.get("resolution", {}) if isinstance(clash.get("resolution", {}), dict) else {}
+        strategy = (
+            resolution.get("best_strategy")
+            or clash.get("best_strategy")
+            or clash.get("strategy")
+            or "?"
+        )
+        cascade = (
+            resolution.get("cascade_risk")
+            or clash.get("cascade_risk")
+            or "?"
+        )
+
+        print("\n[{0}/{1}] {2} | {3} | {4}mm | {5}".format(
+            i + 1, len(batch), cid, sev, pen, grid))
+        print("  Pair     : " + pair)
+        print("  Strategy : " + str(strategy) + " | Cascade: " + str(cascade))
+
+        try:
+            ok, tier, msg = apply_resolution(clash)
+        except Exception as e:
+            ok, tier, msg = False, "-", "Unhandled exception: " + str(e)[:160]
+
+        if ok:
+            tier_counts[tier] = tier_counts.get(tier, 0) + 1
+            print("  RESOLVED [{0}]: {1}".format(tier, msg))
+            clash["_tier"] = tier
+            clash["_msg"] = msg
+            resolved.append(clash)
+        else:
+            print("  SKIPPED  : " + msg)
+            clash["_tier"] = "-"
+            clash["_msg"] = msg
+            skipped.append(clash)
+
+    # ---- SUMMARY ----
+    total = len(batch)
+    n_res = len(resolved)
+    n_skp = len(skipped)
+    pct = (n_res * 100 // total) if total else 0
+
+    print("\n" + "=" * 65)
+    print("  FINAL SUMMARY")
+    print("=" * 65)
+    print("Resolved : {0} / {1}  ({2}%)".format(n_res, total, pct))
+    print("Skipped  : {0} / {1}".format(n_skp, total))
+    print("\nBreakdown by tier:")
+    print("  T1 OffsetParam  (clash-free, cleanest)  : " + str(tier_counts["T1-OffsetParam"]))
+    print("  T1 MoveElement  (clash-free, direct)    : " + str(tier_counts["T1-MoveElement"]))
+    print("  T2 BestEffort   (least-bad move)        : " + str(tier_counts["T2-BestEffort"]))
+    print("  T3 DuctReroute  (3-leg detour, ducts)   : " + str(tier_counts["T3-DuctReroute"]))
+    print("  T3 PipeReroute  (3-leg detour, pipes)   : " + str(tier_counts["T3-PipeReroute"]))
+
+    if resolved:
+        print("\n--- RESOLVED ---")
+        for c in resolved:
+            print("  [OK][{0}] {1} | {2} | {3}".format(
+                c.get("_tier", "?"), c.get("clash_id", "?"), c.get("severity", "?"), c.get("_msg", "")))
+
+    if skipped:
+        print("\n--- SKIPPED (manual fix needed) ---")
+        for c in skipped:
+            print("  [--] {0} | {1} | {2}".format(
+                c.get("clash_id", "?"), c.get("clash_pair_label", "?"), c.get("_msg", "")))
+
+    print("\nDone! Review all moved elements in Revit before saving.")
+    print("=" * 65)
+
+
+# ============================================================
+# RUN
+# ============================================================
+
+run()
+

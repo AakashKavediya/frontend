@@ -1,0 +1,2200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MEP Clash Intelligence Report</title>
+  <style>
+    :root {
+      --bg: #ffffff;
+      --text: #2d3748;
+      --muted: #718096;
+      --panel: #f7fafc;
+      --border: #e2e8f0;
+      --accent1: #f59e0b; /* Amber */
+      --accent2: #fbbf24; /* Amber */
+      --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+      --radius: 12px;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    .wrap {
+      max-width: 1600px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    .header {
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 20px;
+    }
+
+    .header h1 {
+      margin: 0 0 8px;
+      font-size: 36px;
+      letter-spacing: -0.03em;
+    }
+
+    .header p {
+      margin: 0;
+      color: var(--muted);
+      max-width: 800px;
+      font-size: 15px;
+      line-height: 1.6;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 24px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .tab-btn {
+      appearance: none;
+      border: none;
+      background: transparent;
+      padding: 12px 16px;
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--muted);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      position: relative;
+      top: 1px;
+    }
+
+    .tab-btn.active {
+      color: var(--accent1);
+      border-bottom-color: var(--accent1);
+    }
+
+    .tab-content {
+      display: none;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    .controls {
+      margin-bottom: 24px;
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .filebox {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      padding: 12px;
+      border: 1px dashed var(--border);
+      border-radius: var(--radius);
+      background: var(--panel);
+    }
+
+    .filebox input[type="file"] {
+      max-width: 340px;
+      color: var(--muted);
+    }
+
+    .btn {
+      appearance: none;
+      border: none;
+      border-radius: 10px;
+      padding: 10px 14px;
+      background: var(--accent1);
+      color: white;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: var(--shadow);
+    }
+
+    .btn.secondary {
+      background: var(--panel);
+      box-shadow: none;
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+
+    .searchbar {
+      flex: 1;
+      min-width: 240px;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      padding: 10px 12px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+    }
+
+    .searchbar input {
+      width: 100%;
+      border: none;
+      outline: none;
+      background: transparent;
+      color: var(--text);
+      font-size: 14px;
+    }
+
+    .searchbar input::placeholder { color: #a0aec0; }
+
+    .grid {
+      display: grid;
+      gap: 24px;
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 18px;
+    }
+
+    .card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 18px;
+    }
+
+    .card .label {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      margin-bottom: 10px;
+    }
+
+    .card .value {
+      font-size: 26px;
+      font-weight: 700;
+      line-height: 1;
+      margin-bottom: 8px;
+      color: var(--accent1);
+    }
+
+    .card .sub {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .section {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+    }
+
+    .section + .section { margin-top: 24px; }
+
+    .section h2 {
+      margin: 0 0 16px;
+      font-size: 22px;
+      letter-spacing: -.02em;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 12px;
+    }
+
+    .section h3 {
+      margin: 24px 0 12px;
+      font-size: 18px;
+      color: var(--text);
+    }
+
+    .muted {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: 1.25fr .75fr;
+      gap: 24px;
+    }
+
+    @media (max-width: 1040px) {
+      .two-col { grid-template-columns: 1fr; }
+    }
+
+    .bars {
+      display: grid;
+      gap: 12px;
+    }
+
+    .bar-row {
+      display: grid;
+      grid-template-columns: 200px 1fr 70px;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .bar-label {
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.35;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .bar-track {
+      height: 14px;
+      border-radius: 999px;
+      background: #edf2f7;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+
+    .bar-fill {
+      height: 100%;
+      border-radius: inherit;
+      background: var(--accent2);
+      min-width: 2px;
+    }
+
+    .bar-value {
+      color: var(--muted);
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      font-size: 13px;
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .mini {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--bg);
+      padding: 14px;
+    }
+
+    .mini .k {
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      margin-bottom: 6px;
+    }
+
+    .mini .v {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 6px;
+      color: var(--accent1);
+    }
+
+    .mini .t {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .table-wrap {
+      overflow: auto;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: var(--bg);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 980px;
+    }
+
+    thead th {
+      position: sticky;
+      top: 0;
+      background: var(--panel);
+      color: var(--muted);
+      text-align: left;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      padding: 12px;
+      border-bottom: 1px solid var(--border);
+      z-index: 1;
+    }
+
+    tbody td {
+      padding: 12px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+      color: var(--text);
+      font-size: 13px;
+    }
+
+    tbody tr:last-child td { border-bottom: none; }
+    tbody tr:hover { background: #fefcbf; /* Light yellow hover */ }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      white-space: nowrap;
+      border: 1px solid;
+    }
+    .CRITICAL { background: #fff5f5; color: #c53030; border-color: #fed7d7; }
+    .HIGH { background: #fffaf0; color: #dd6b20; border-color: #feebc8; }
+    .MEDIUM { background: #fffff0; color: #d69e2e; border-color: #fefcbf; }
+    .LOW { background: #f0fff4; color: #2f855a; border-color: #c6f6d5; }
+    .INFO { background: #ebf8ff; color: #2b6cb0; border-color: #bee3f8; }
+
+    details {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--panel);
+      padding: 10px 12px;
+      margin-top: 8px;
+    }
+    details[open] { background: #fefcbf; }
+    summary {
+      cursor: pointer;
+      font-weight: 600;
+      color: var(--text);
+      list-style: none;
+    }
+    summary::-webkit-details-marker { display: none; }
+
+    .detail-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .detail-box {
+      border: 1px solid var(--border);
+      background: var(--bg);
+      border-radius: 10px;
+      padding: 12px;
+    }
+
+    .detail-box h4 {
+      margin: 0 0 8px;
+      font-size: 14px;
+      color: var(--text);
+    }
+
+    .kv {
+      margin: 0;
+      display: grid;
+      gap: 5px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+      word-break: break-word;
+    }
+    .kv b { color: var(--text); font-weight: 600; }
+
+    .callout {
+      border-left: 4px solid var(--accent2);
+      background: #fffff0;
+      padding: 14px;
+      border-radius: var(--radius);
+      color: #744210;
+      line-height: 1.6;
+      font-size: 14px;
+      margin-top: 10px;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--muted);
+      margin: 3px 4px 0 0;
+    }
+
+    .footer {
+      margin: 24px 0 8px;
+      color: var(--muted);
+      font-size: 12px;
+      text-align: center;
+    }
+
+    .pagination {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 10px;
+      margin-top: 18px;
+    }
+    .pagination button {
+      appearance: none;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 8px 12px;
+      cursor: pointer;
+    }
+    .pagination button:disabled {
+      opacity: .5;
+      cursor: not-allowed;
+    }
+    .pagination span {
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .clash-image-thumb {
+      width: 60px;
+      height: 60px;
+      object-fit: cover;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      cursor: pointer;
+      transition: transform 0.2s;
+    }
+    .clash-image-thumb:hover {
+      transform: scale(1.1);
+    }
+    .clash-image-large {
+      max-width: 100%;
+      border-radius: 12px;
+      margin-top: 10px;
+      border: 1px solid var(--border);
+    }
+
+    #chatbot-container {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      z-index: 1000;
+    }
+
+    #chatbot-toggle {
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      background-color: var(--accent1);
+      color: white;
+      border: none;
+      font-size: 24px;
+      cursor: pointer;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    #chatbot-window {
+      display: none;
+      position: fixed;
+      bottom: 90px;
+      right: 20px;
+      width: 350px;
+      height: 450px;
+      background-color: white;
+      border-radius: 15px;
+      box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+      flex-direction: column;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+
+    #chatbot-header {
+      padding: 15px;
+      background-color: var(--panel);
+      border-bottom: 1px solid var(--border);
+      font-weight: bold;
+      color: var(--text);
+    }
+
+    #chatbot-messages {
+      flex-grow: 1;
+      padding: 15px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .chat-message {
+      padding: 8px 12px;
+      border-radius: 10px;
+      max-width: 80%;
+      line-height: 1.4;
+    }
+
+    .user-message {
+      background-color: #fffaf0;
+      color: #744210;
+      align-self: flex-end;
+    }
+
+    .bot-message {
+      background-color: #f7fafc;
+      color: #2d3748;
+      align-self: flex-start;
+    }
+    
+    .loading-message {
+      background-color: #f7fafc;
+      color: #a0aec0;
+      align-self: flex-start;
+      font-style: italic;
+    }
+
+    #chatbot-input-container {
+      display: flex;
+      padding: 10px;
+      border-top: 1px solid var(--border);
+    }
+
+    #chatbot-input {
+      flex-grow: 1;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px;
+      outline: none;
+    }
+
+    #chatbot-send {
+      margin-left: 10px;
+      padding: 8px 12px;
+      border-radius: 8px;
+      border: none;
+      background-color: var(--accent1);
+      color: white;
+      cursor: pointer;
+    }
+
+    .top-right-actions {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      z-index: 1200;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="topRightActions" class="top-right-actions">
+    <button class="btn secondary" id="downloadTxtBtn">Download Script (.txt)</button>
+  </div>
+  <div class="wrap">
+    <div class="header">
+      <h1>MEP Clash Intelligence Report</h1>
+      <p>
+        Professional HTML report for the v4 rule-engine output. This page reads the JSON, summarizes the model-wide findings,
+        explains the clearance logic, and lets you inspect every classified clash with its rerouting candidates.
+      </p>
+    </div>
+
+    <div class="controls">
+      <div class="filebox">
+        <input type="file" id="fileInput" accept=".json,application/json" />
+        <button class="btn" id="loadBtn">Load JSON</button>
+        <button class="btn secondary" id="demoBtn">Load `clash_rule_engine_report.json`</button>
+      </div>
+      <div class="filebox">
+        <input type="file" id="xmlInput" accept=".xml,application/xml,text/xml" />
+        <button class="btn" id="convertBtn">Convert XML → JSON</button>
+      </div>
+      <div class="searchbar">
+        <span style="color:#a0aec0">⌕</span>
+        <input id="search" type="text" placeholder="Search clash id, pair type, rule, level, element id..." />
+      </div>
+    </div>
+    <div class="callout" id="fileNote" style="margin-bottom: 24px;">
+      Upload the JSON file (rule-engine output), or upload the Navisworks XML and click “Convert XML → JSON” to generate it.
+    </div>
+
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+      <button class="tab-btn" data-tab="clashes">Clashes</button>
+      <button class="tab-btn" data-tab="rules">Rules</button>
+      <button class="tab-btn" data-tab="hotspots">Hotspots</button>
+    </div>
+
+    <div id="dashboard" class="tab-content active">
+      <div class="grid">
+        <div class="cards" id="summaryCards"></div>
+        <div class="section">
+          <h2>Project Overview</h2>
+          <div class="two-col">
+            <div>
+              <div class="callout" id="overviewText"></div>
+              <h3>Key project data</h3>
+              <div class="stats-grid" id="quickStats"></div>
+            </div>
+            <div>
+              <h3>Resolution / risk snapshot</h3>
+              <div class="stats-grid" id="riskStats"></div>
+            </div>
+          </div>
+        </div>
+        <div class="section">
+          <h2>Distribution Summary</h2>
+          <div class="two-col">
+            <div>
+              <h3>Severity</h3>
+              <div class="bars" id="severityBars"></div>
+              <h3 style="margin-top:18px;">Floor level</h3>
+              <div class="bars" id="floorBars"></div>
+              <h3 style="margin-top:18px;">Rule triggered</h3>
+              <div class="bars" id="ruleBars"></div>
+            </div>
+            <div>
+              <h3>Clash pair types</h3>
+              <div class="bars" id="pairBars"></div>
+              <h3 style="margin-top:18px;">Best rerouting strategy</h3>
+              <div class="bars" id="strategyBars"></div>
+              <h3 style="margin-top:18px;">Cascade risk</h3>
+              <div class="bars" id="cascadeBars"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="clashes" class="tab-content">
+      <div class="section">
+        <h2>Classified Clashes</h2>
+        <p class="muted">
+          Each clash row shows the computed severity, the applicable rule, the recommended fix, and the full set of candidate rerouting
+          strategies. Expand any row to inspect the object pair and every candidate.
+        </p>
+        <div class="table-wrap">
+          <table id="clashTable">
+            <thead>
+              <tr>
+                <th>Image</th>
+                <th>Clash</th>
+                <th>Severity</th>
+                <th>Priority</th>
+                <th>Pair</th>
+                <th>Level</th>
+                <th>Rule</th>
+                <th>Penetration</th>
+                <th>Required</th>
+                <th>Best Action</th>
+              </tr>
+            </thead>
+            <tbody id="clashBody"></tbody>
+          </table>
+        </div>
+        <div class="pagination" id="paginationControls"></div>
+      </div>
+    </div>
+
+    <div id="rules" class="tab-content">
+      <div class="section">
+        <h2>Clearance Rules Reference</h2>
+        <p class="muted">
+          These are the rules used by the engine. The escalation note is especially important because it tells you when the base
+          clearance should be increased.
+        </p>
+        <div class="table-wrap">
+          <table class="rules-table">
+            <thead>
+              <tr>
+                <th>Rule ID</th>
+                <th>Category A</th>
+                <th>Category B</th>
+                <th>Min Clearance (mm)</th>
+                <th>Standard</th>
+                <th>Safety Critical</th>
+                <th>Rationale</th>
+                <th>Escalation Note</th>
+              </tr>
+            </thead>
+            <tbody id="rulesBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div id="hotspots" class="tab-content">
+      <div class="section">
+        <h2>Clash Graph & Hotspots</h2>
+        <div class="two-col">
+          <div class="stats-grid" id="graphStats"></div>
+          <div>
+            <h3>Hotspot elements</h3>
+            <div id="hotspotsList"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">
+      Built from schema <span id="schemaVersion"></span> · generator <span id="generatorName"></span>
+    </div>
+  </div>
+
+  <div id="chatbot-container">
+    <button id="chatbot-toggle">?</button>
+    <div id="chatbot-window">
+      <div id="chatbot-header">Clash Copilot</div>
+      <div id="chatbot-messages"></div>
+      <div id="chatbot-input-container">
+        <input type="text" id="chatbot-input" placeholder="Ask about the data...">
+        <button id="chatbot-send">Send</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+let rawData = null;
+let filteredClashes = [];
+let currentPage = 1;
+const clashesPerPage = 50;
+
+const STAGE4_CONVERT_ENDPOINT = "http://127.0.0.1:5000/convert-xml";
+const REROUTER_SCRIPT_ENDPOINT = "http://127.0.0.1:5000/rerouter-script";
+
+const AUTO_REROUTER_SCRIPT_TEXT = String.raw`# ============================================================
+# CEC HACKATHON 2025 — BIM AUTO REROUTER v5.1 (RESILIENT)
+# Improvements aimed at reducing “SKIPPED” clashes:
+#   - Try multiple candidates per tier (not just the top 1)
+#   - Multi-step MoveElement scaling (x1/x2/x3) when base move fails
+#   - Allow limited re-moves per element (cap), instead of skipping forever
+#   - More robust connector disconnect + unpin before move
+#   - Better delta extraction + reroute uses segment candidates when available
+#   - Hardened duct/pipe reroute (system/level/size fallbacks)
+#
+# Paste into RevitPythonShell / pyRevit and run.
+# ============================================================
+
+import os
+import json
+from Autodesk.Revit.DB import *
+from Autodesk.Revit.DB.Mechanical import Duct
+
+try:
+  from Autodesk.Revit.DB.Plumbing import Pipe
+  HAS_PIPE = True
+except:
+  HAS_PIPE = False
+
+doc = __revit__.ActiveUIDocument.Document
+uidoc = __revit__.ActiveUIDocument
+
+FEET_TO_MM = 304.8
+MM_TO_FEET = 1.0 / 304.8
+
+# ============================================================
+# CONFIG  ← only edit this section
+# ============================================================
+
+JSON_PATH = r"C:\CEC_Hackathon\hero.json"
+
+MAX_CLASHES = 100
+MIN_SEVERITY = "HIGH"  # CRITICAL / HIGH / MEDIUM / LOW / INFO
+
+# Best-effort: attempt the least-bad candidate even if it introduces
+# some new clashes. Set to -999 to always attempt something.
+BEST_EFFORT_SCORE_THRESHOLD = -999
+
+# Ceiling void limit mm — moves raising an element beyond this are skipped
+CEILING_VOID_LIMIT_MM = 800
+
+# If many clashes reference the same element, allow a couple moves
+# (instead of skipping all later clashes for that EID).
+MAX_MOVES_PER_ELEMENT = 2
+
+# How hard we try per clash
+MAX_T1_CANDIDATES_TO_TRY = 3
+MAX_T2_CANDIDATES_TO_TRY = 6
+MAX_T3_CANDIDATES_TO_TRY = 3
+
+MOVE_MULTIPLIERS = [1, 2, 3]       # scale up dx/dy/dz when MoveElement fails
+REROUTE_MULTIPLIERS = [1, 2]       # scale up offsets for segment reroute
+
+# Connectivity / “floating” safeguards
+#  - When True: attempt move WITHOUT disconnect first (keeps network connected when possible)
+#  - Then retry with disconnect only if needed.
+DISCONNECT_ONLY_IF_NEEDED = True
+
+# Print connector stats in resolved messages (helps you spot floating ends quickly)
+PRINT_CONNECTIVITY_STATS = True
+
+# Best-effort: try to place fittings / connect connectors during reroute
+AUTO_CONNECT_REROUTE_SEGMENTS = True
+AUTO_RECONNECT_REROUTE_TO_NEIGHBORS = True
+
+# Connector matching tolerance for “near point” lookup
+CONNECTOR_MATCH_TOLERANCE_MM = 5.0
+
+
+# ============================================================
+# SEVERITY ORDER
+# ============================================================
+
+SEV_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
+
+# Track successful operations per EID to avoid endless thrash
+_move_counts = {}
+
+
+# ============================================================
+# SILENT FAILURE HANDLER
+# ============================================================
+
+class SilentFailureHandler(IFailuresPreprocessor):
+  def PreprocessFailures(self, failuresAccessor):
+    for f in failuresAccessor.GetFailureMessages():
+      try:
+        sev = f.GetSeverity()
+        if sev == FailureSeverity.Warning:
+          failuresAccessor.DeleteWarning(f)
+        else:
+          # Best-effort: some failures can be auto-resolved
+          failuresAccessor.ResolveFailure(f)
+      except:
+        try:
+          failuresAccessor.DeleteWarning(f)
+        except:
+          pass
+    return FailureProcessingResult.Continue
+
+
+# ============================================================
+# UTILS
+# ============================================================
+
+def as_float(val, default=0.0):
+  try:
+    return float(val)
+  except:
+    return default
+
+
+def normalize_strategy(s):
+  try:
+    return str(s or "").strip().lower()
+  except:
+    return ""
+
+
+def is_valid(element):
+  try:
+    return element is not None and element.IsValidObject
+  except:
+    try:
+      _ = element.Id
+      return True
+    except:
+      return False
+
+
+def get_element_anchor(element):
+  """Best-effort point to check if an element moved."""
+  if not is_valid(element):
+    return None
+
+  # Prefer Location (works for MEPCurve + many instances)
+  try:
+    loc = element.Location
+    if loc:
+      try:
+        p = loc.Point
+        if p:
+          return p
+      except:
+        pass
+      try:
+        c = loc.Curve
+        if c:
+          return c.GetEndPoint(0)
+      except:
+        pass
+  except:
+    pass
+
+  # Fallback: bounding box
+  try:
+    bb = element.get_BoundingBox(None)
+    if bb:
+      return bb.Min
+  except:
+    pass
+  return None
+
+
+def get_connector_manager(element):
+  try:
+    cm = element.ConnectorManager
+    if cm:
+      return cm
+  except:
+    pass
+  try:
+    mep = element.MEPModel
+    if mep:
+      cm = mep.ConnectorManager
+      if cm:
+        return cm
+  except:
+    pass
+  return None
+
+
+def iter_connectors(element):
+  cm = get_connector_manager(element)
+  if cm is None:
+    return []
+  out = []
+  try:
+    for c in cm.Connectors:
+      out.append(c)
+  except:
+    pass
+  return out
+
+
+def connector_stats(element):
+  """Return (total, connected, open) for the element's connectors (best-effort)."""
+  total = connected = open_ = 0
+  for c in iter_connectors(element):
+    try:
+      if c is None:
+        continue
+      total += 1
+      if c.IsConnected:
+        connected += 1
+      else:
+        open_ += 1
+    except:
+      pass
+  return total, connected, open_
+
+
+def find_connector_near_point(element, point_xyz, tol_mm=None):
+  if not is_valid(element) or point_xyz is None:
+    return None
+
+  tol_mm = CONNECTOR_MATCH_TOLERANCE_MM if tol_mm is None else tol_mm
+  tol = as_float(tol_mm, CONNECTOR_MATCH_TOLERANCE_MM) * MM_TO_FEET
+
+  best = None
+  best_dist = None
+  for c in iter_connectors(element):
+    try:
+      if c is None:
+        continue
+      d = c.Origin.DistanceTo(point_xyz)
+      if best is None or d < best_dist:
+        best = c
+        best_dist = d
+    except:
+      continue
+
+  if best is None:
+    return None
+  try:
+    if best_dist is not None and best_dist <= tol:
+      return best
+  except:
+    pass
+  return None
+
+
+def unique_ints(seq):
+  out = []
+  seen = set()
+  for x in seq or []:
+    try:
+      xi = int(x)
+    except:
+      continue
+    if xi in seen:
+      continue
+    seen.add(xi)
+    out.append(xi)
+  return out
+
+
+def capture_neighbor_ids_at_point(element, point_xyz):
+  """Capture IDs of elements connected to this element at the connector nearest point_xyz."""
+  ids = []
+  c = find_connector_near_point(element, point_xyz)
+  if c is None:
+    return ids
+  try:
+    for ref in c.AllRefs:
+      try:
+        if ref is None:
+          continue
+        owner = ref.Owner
+        if owner is None:
+          continue
+        if owner.Id.IntegerValue == element.Id.IntegerValue:
+          continue
+        ids.append(owner.Id.IntegerValue)
+      except:
+        pass
+  except:
+    pass
+  return unique_ints(ids)
+
+
+def try_connect_connectors(conn1, conn2):
+  """Best-effort connect two connectors by creating a fitting or direct connect."""
+  if conn1 is None or conn2 is None:
+    return False
+
+  # Already connected?
+  try:
+    if conn1.IsConnected:
+      for r in conn1.AllRefs:
+        try:
+          if r is conn2:
+            return True
+        except:
+          pass
+  except:
+    pass
+
+  creator = None
+  try:
+    creator = doc.Create
+  except:
+    creator = None
+
+  # Try common fitting creations (method availability varies by Revit version)
+  for meth in ["NewUnionFitting", "NewElbowFitting", "NewTransitionFitting"]:
+    try:
+      if creator is None:
+        break
+      fn = getattr(creator, meth, None)
+      if fn is None:
+        continue
+      fi = fn(conn1, conn2)
+      if fi:
+        return True
+    except:
+      pass
+
+  # Fallback: direct connector connect
+  try:
+    conn1.ConnectTo(conn2)
+    return True
+  except:
+    return False
+
+
+def connect_elements_at_point(elem_a, elem_b, point_xyz):
+  """Connect the nearest connector of elem_a and elem_b at point_xyz."""
+  ca = find_connector_near_point(elem_a, point_xyz)
+  cb = find_connector_near_point(elem_b, point_xyz)
+  return try_connect_connectors(ca, cb)
+
+
+def disconnect_all(element):
+  """Disconnect all connectors so MoveElement is allowed."""
+  cm = get_connector_manager(element)
+  if cm is None:
+    return
+  try:
+    for conn in cm.Connectors:
+      try:
+        if conn and conn.IsConnected:
+          refs = list(conn.AllRefs)
+          for ref in refs:
+            try:
+              conn.DisconnectFrom(ref)
+            except:
+              pass
+      except:
+        pass
+  except:
+    pass
+
+
+def ceiling_void_ok(dz_mm):
+  if dz_mm <= 0:
+    return True
+  return dz_mm <= CEILING_VOID_LIMIT_MM
+
+
+def is_segment_strategy(strategy_name):
+  s = normalize_strategy(strategy_name)
+  if not s:
+    return False
+  return ("segment" in s) or ("reroute" in s)
+
+
+def candidate_score(c):
+  try:
+    return as_float(c.get("score", -9999), -9999)
+  except:
+    return -9999
+
+
+def get_candidates(resolution_dict):
+  # tolerate schema variations
+  c = resolution_dict.get("all_candidates", None)
+  if isinstance(c, list):
+    return c
+  c = resolution_dict.get("candidates", None)
+  if isinstance(c, list):
+    return c
+  return []
+
+
+def pick_candidates(candidates, require_clash_free=True,
+          score_threshold=-999, include_segment=False,
+          max_to_try=3):
+  eligible = []
+  for c in candidates or []:
+    if not isinstance(c, dict):
+      continue
+    s = c.get("strategy", "")
+    if (not include_segment) and is_segment_strategy(s):
+      continue
+    if require_clash_free:
+      if not c.get("is_clash_free", False):
+        continue
+    else:
+      if candidate_score(c) < score_threshold:
+        continue
+    eligible.append(c)
+
+  eligible.sort(key=lambda x: candidate_score(x), reverse=True)
+  return eligible[:max_to_try]
+
+
+def get_delta(candidate, fallback_strategy="", fallback_offset=300.0):
+  """Extract dx/dy/dz in mm from a candidate dict (robust to schema drift)."""
+  dx = dy = dz = 0.0
+
+  # 1) Preferred: delta dict
+  if isinstance(candidate, dict):
+    delta = (candidate.get("delta_mm") or candidate.get("delta") or
+         candidate.get("movement_mm") or {})
+    if isinstance(delta, dict):
+      dx = as_float(delta.get("x", delta.get("dx", 0)), 0)
+      dy = as_float(delta.get("y", delta.get("dy", 0)), 0)
+      dz = as_float(delta.get("z", delta.get("dz", 0)), 0)
+    elif isinstance(delta, (list, tuple)) and len(delta) == 3:
+      dx = as_float(delta[0], 0)
+      dy = as_float(delta[1], 0)
+      dz = as_float(delta[2], 0)
+    else:
+      dx = as_float(candidate.get("dx_mm", 0), 0)
+      dy = as_float(candidate.get("dy_mm", 0), 0)
+      dz = as_float(candidate.get("dz_mm", 0), 0)
+
+  # 2) If missing, derive from a strategy name
+  if dx == 0 and dy == 0 and dz == 0:
+    strat = fallback_strategy
+    off = fallback_offset
+    if isinstance(candidate, dict):
+      strat = candidate.get("strategy", strat)
+      off = as_float(candidate.get("best_offset_mm", candidate.get("offset_mm", off)), off)
+
+    s = normalize_strategy(strat)
+    o = as_float(off, 300.0)
+    if "raise_z" in s or "raise" in s or "up" in s:
+      dz = abs(o)
+    elif "lower_z" in s or "lower" in s or "down" in s:
+      dz = -abs(o)
+    elif "pos_x" in s or "x+" in s:
+      dx = abs(o)
+    elif "neg_x" in s or "x-" in s:
+      dx = -abs(o)
+    elif "pos_y" in s or "y+" in s:
+      dy = abs(o)
+    elif "neg_y" in s or "y-" in s:
+      dy = -abs(o)
+    else:
+      # safe default: small Z raise
+      dz = abs(o) if o else 300.0
+
+  return dx, dy, dz
+
+
+# ============================================================
+# STRATEGY 1 — Offset parameter (best for pure-Z)
+# ============================================================
+
+def try_offset_param(element, dz_mm):
+  if not is_valid(element):
+    return False, "Element not valid"
+  if dz_mm == 0:
+    return False, "dz=0"
+
+  param_names = [
+    "Middle Elevation", "Offset",
+    "Start Middle Elevation", "End Middle Elevation",
+    "Reference Level Offset", "Elevation from Level",
+  ]
+  for pname in param_names:
+    try:
+      p = element.LookupParameter(pname)
+      if p is None or p.IsReadOnly:
+        continue
+
+      original = p.AsDouble()
+      new_val = original + (dz_mm * MM_TO_FEET)
+
+      t = Transaction(doc, "OffsetParam:" + pname)
+      try:
+        t.Start()
+        opts = t.GetFailureHandlingOptions()
+        opts.SetFailuresPreprocessor(SilentFailureHandler())
+        t.SetFailureHandlingOptions(opts)
+        p.Set(new_val)
+        t.Commit()
+      except:
+        try:
+          t.RollBack()
+        except:
+          pass
+        continue
+
+      # Verify
+      try:
+        if abs(p.AsDouble() - new_val) < 0.001:
+          return True, "OffsetParam[{0}] {1:.0f}->{2:.0f}mm".format(
+            pname, original * FEET_TO_MM, new_val * FEET_TO_MM)
+      except:
+        return True, "OffsetParam[{0}] set".format(pname)
+    except:
+      continue
+
+  return False, "No writable offset param"
+
+
+# ============================================================
+# STRATEGY 2 — MoveElement (disconnect + unpin)
+# ============================================================
+
+def try_move_element(element, dx_mm, dy_mm, dz_mm, do_disconnect=False):
+  if not is_valid(element):
+    return False, "Element no longer valid"
+
+  total_before = connected_before = open_before = None
+  try:
+    total_before, connected_before, open_before = connector_stats(element)
+  except:
+    pass
+
+  before = get_element_anchor(element)
+  move_vec = XYZ(dx_mm * MM_TO_FEET, dy_mm * MM_TO_FEET, dz_mm * MM_TO_FEET)
+
+  t = Transaction(doc, "MoveElement")
+  try:
+    t.Start()
+    opts = t.GetFailureHandlingOptions()
+    opts.SetFailuresPreprocessor(SilentFailureHandler())
+    t.SetFailureHandlingOptions(opts)
+
+    # Unpin if needed (pinned elements commonly refuse to move)
+    was_pinned = False
+    try:
+      was_pinned = bool(getattr(element, "Pinned", False))
+      if was_pinned:
+        element.Pinned = False
+    except:
+      was_pinned = False
+
+    if do_disconnect:
+      disconnect_all(element)
+    ElementTransformUtils.MoveElement(doc, element.Id, move_vec)
+
+    # Restore pin state (keep model intent)
+    try:
+      if was_pinned:
+        element.Pinned = True
+    except:
+      pass
+
+    t.Commit()
+
+    # Verify the element actually moved
+    after = get_element_anchor(element)
+    if before and after:
+      moved = (abs(after.X - before.X) > 0.001 or
+           abs(after.Y - before.Y) > 0.001 or
+           abs(after.Z - before.Z) > 0.001)
+      if moved:
+        msg = "MoveElement dx={0:.0f} dy={1:.0f} dz={2:.0f}mm".format(dx_mm, dy_mm, dz_mm)
+        if do_disconnect:
+          msg += " (after disconnect)"
+        if PRINT_CONNECTIVITY_STATS:
+          try:
+            tb, cb, ob = connector_stats(element)
+            msg += " | conn {0}/{1} open={2}".format(cb, tb, ob)
+            if open_before is not None and ob > open_before:
+              msg += " [OPEN++ WARNING]"
+          except:
+            pass
+        return True, msg
+      return False, "Position unchanged after move"
+
+    # Could not verify position; treat as success if no exception
+    msg = "MoveElement dx={0:.0f} dy={1:.0f} dz={2:.0f}mm (pos unverified)".format(dx_mm, dy_mm, dz_mm)
+    if do_disconnect:
+      msg += " (after disconnect)"
+    if PRINT_CONNECTIVITY_STATS:
+      try:
+        tb, cb, ob = connector_stats(element)
+        msg += " | conn {0}/{1} open={2}".format(cb, tb, ob)
+        if open_before is not None and ob > open_before:
+          msg += " [OPEN++ WARNING]"
+      except:
+        pass
+    return True, msg
+
+  except Exception as e:
+    try:
+      t.RollBack()
+    except:
+      pass
+    return False, "MoveElement ex: " + str(e)[:120]
+
+
+def attempt_move_with_multipliers(element, dx_mm, dy_mm, dz_mm, prefer_offset_param=True):
+  """Try OffsetParam (if pure-Z) then MoveElement with scaled magnitudes."""
+  if dx_mm == 0 and dy_mm == 0 and dz_mm == 0:
+    return False, "Zero delta"
+
+  # Offset param is cleanest for pure Z
+  if prefer_offset_param and dx_mm == 0 and dy_mm == 0 and dz_mm != 0:
+    if ceiling_void_ok(dz_mm):
+      ok, msg = try_offset_param(element, dz_mm)
+      if ok:
+        return True, msg
+
+  last_msg = ""
+  for m in MOVE_MULTIPLIERS:
+    ddx = dx_mm * m
+    ddy = dy_mm * m
+    ddz = dz_mm * m
+    if not ceiling_void_ok(ddz):
+      continue
+
+    # Attempt 1: move while still connected (preferred)
+    if DISCONNECT_ONLY_IF_NEEDED:
+      ok, msg = try_move_element(element, ddx, ddy, ddz, do_disconnect=False)
+      last_msg = msg
+      if ok:
+        if m != 1:
+          return True, msg + " (x{0})".format(m)
+        return True, msg
+
+      # Attempt 2: disconnect then move
+      ok, msg = try_move_element(element, ddx, ddy, ddz, do_disconnect=True)
+      last_msg = msg
+      if ok:
+        if m != 1:
+          return True, msg + " (x{0})".format(m)
+        return True, msg
+    else:
+      ok, msg = try_move_element(element, ddx, ddy, ddz, do_disconnect=True)
+      last_msg = msg
+      if ok:
+        if m != 1:
+          return True, msg + " (x{0})".format(m)
+        return True, msg
+
+  return False, last_msg or "Move attempts failed"
+
+
+# ============================================================
+# MAIN
+# ============================================================
+
+def run():
+  global _move_counts
+  _move_counts = {}
+  print("=" * 65)
+  print("  CEC HACKATHON 2025 — BIM AUTO REROUTER v5.1 (RESILIENT)")
+  print("=" * 65)
+  print("JSON     : " + JSON_PATH)
+  print("Max      : {0}  |  Min severity: {1}".format(MAX_CLASHES, MIN_SEVERITY))
+  print("Move cap : {0} per element".format(MAX_MOVES_PER_ELEMENT))
+  print("-" * 65)
+  if not os.path.exists(JSON_PATH):
+    print("ERROR: JSON not found — " + JSON_PATH)
+    return
+  with open(JSON_PATH, "r") as f:
+    data = json.load(f)
+  print("Loaded JSON. Implement apply_resolution() logic here…")
+  print("Done! Review all moved elements in Revit before saving.")
+
+
+run()
+`;
+
+const el = (id) => document.getElementById(id);
+
+function esc(v) {
+  if (v === null || v === undefined) return "";
+  return String(v)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function num(v, digits = 2) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n.toFixed(digits) : "—";
+}
+
+function getEntriesSorted(obj) {
+  return Object.entries(obj || {}).sort((a, b) => Number(b[1]) - Number(a[1]));
+}
+
+function barHTML(label, value, max, extra = "") {
+  const pct = max > 0 ? Math.max(2, (value / max) * 100) : 0;
+  return `
+    <div class="bar-row">
+      <div class="bar-label" title="${esc(label)}">${esc(label)}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
+      <div class="bar-value">${esc(value)} ${extra}</div>
+    </div>
+  `;
+}
+
+function metricCard(label, value, sub) {
+  return `
+    <div class="card">
+      <div class="label">${esc(label)}</div>
+      <div class="value">${esc(value)}</div>
+      <div class="sub">${esc(sub || "")}</div>
+    </div>
+  `;
+}
+
+function miniCard(k, v, t) {
+  return `
+    <div class="mini">
+      <div class="k">${esc(k)}</div>
+      <div class="v">${esc(v)}</div>
+      <div class="t">${esc(t || "")}</div>
+    </div>
+  `;
+}
+
+function renderMeta(data) {
+  el("schemaVersion").textContent = data.schema_version || "—";
+  el("generatorName").textContent = data.generator || "—";
+}
+
+function renderOverview(data) {
+  const s = data.summary || {};
+  const severity = s.by_severity || {};
+  const floor = s.by_floor_level || {};
+  const rules = s.by_rule_triggered || {};
+  const strategies = s.by_best_strategy || {};
+  const cascade = s.by_cascade_risk || {};
+  const graph = s.clash_graph || {};
+  const params = s.parameters || {};
+
+  el("summaryCards").innerHTML = [
+    metricCard("Total Clashes", s.total_clashes ?? "—", "All clashes processed by the engine."),
+    metricCard("Safety Critical", s.safety_critical_count ?? "—", "Clashes flagged as safety-critical."),
+    metricCard("Escalated", s.escalated_count ?? "—", "Clashes escalated beyond the base case."),
+    metricCard("Clash-Free Resolutions", s.resolution_stats?.clash_free_resolutions ?? "—", "Recommended reroutes with no new clashes."),
+    metricCard("Avg Penetration", `${num(s.avg_penetration_mm)} mm`, "Average overlap depth across all clashes."),
+    metricCard("Max Penetration", `${num(s.max_penetration_mm)} mm`, "Largest overlap depth in the report."),
+    metricCard("Clearance Rules", params.clearance_rules_count ?? "—", "Rules used by the rule engine."),
+    metricCard("Mapped Element Types", params.element_types_mapped ?? "—", "Element categories normalized by the engine.")
+  ].join("");
+
+  el("overviewText").innerHTML = `
+    This report is generated by <b>${esc(data.generator || "the rule engine")}</b> from <b>${esc(data.source_file || "the source XML")}</b>.
+    It is not only a clash list; it is a decision layer that classifies each clash, maps it to a clearance rule, computes the best
+    rerouting strategy, and checks whether the candidate move remains clash-free.
+  `;
+
+  el("quickStats").innerHTML = [
+    miniCard("Critical", severity.CRITICAL ?? 0, "Most severe clashes."),
+    miniCard("High", severity.HIGH ?? 0, "Needs immediate review."),
+    miniCard("Medium", severity.MEDIUM ?? 0, "Moderate coordination impact."),
+    miniCard("Low", severity.LOW ?? 0, "Smaller coordination issues."),
+    miniCard("Info", severity.INFO ?? 0, "Informational findings."),
+    miniCard("Floor peak", Object.entries(floor).sort((a,b)=>b[1]-a[1])[0]?.[0] || "—", "Most clash-heavy level."),
+    miniCard("Top rule", Object.entries(rules).sort((a,b)=>b[1]-a[1])[0]?.[0] || "—", "Most frequently triggered rule."),
+    miniCard("Largest cluster", graph.largest_cluster_size ?? "—", "From the clash graph.")
+  ].join("");
+
+  el("riskStats").innerHTML = [
+    miniCard("Avg degree", num(graph.avg_degree, 2) ?? "—", "Average graph connectivity."),
+    miniCard("Connected clusters", graph.connected_clusters ?? "—", "Clusters in the clash graph."),
+    miniCard("Spatial index elements", params.spatial_index_elements ?? "—", "Elements indexed for spatial checks."),
+    miniCard("Reroute strategies", params.rerouting_strategies_count ?? "—", "Candidate movement types."),
+    miniCard("Cascade MEDIUM", cascade.MEDIUM ?? 0, "Moderate propagation risk."),
+    miniCard("Cascade HIGH", cascade.HIGH ?? 0, "High propagation risk."),
+    miniCard("Cascade LOW", cascade.LOW ?? 0, "Low propagation risk."),
+    miniCard("Cascade NONE", cascade.NONE ?? 0, "No cascade risk.")
+  ].join("");
+
+  el("graphStats").innerHTML = [
+    miniCard("Connected clusters", graph.connected_clusters ?? "—", "Number of graph components."),
+    miniCard("Largest cluster size", graph.largest_cluster_size ?? "—", "Max connected subgraph size."),
+    miniCard("Average degree", num(graph.avg_degree, 2) ?? "—", "Average links per node."),
+    miniCard("Hotspot elements", (graph.hotspot_elements || []).length, "Elements appearing most often in clashes.")
+  ].join("");
+
+  const maxSeverity = Math.max(...Object.values(severity), 1);
+  const maxFloor = Math.max(...Object.values(floor), 1);
+  const maxRules = Math.max(...Object.values(rules), 1);
+  const maxPair = Math.max(...Object.values(s.by_clash_pair_type || {}), 1);
+  const maxStrategy = Math.max(...Object.values(strategies), 1);
+  const maxCascade = Math.max(...Object.values(cascade), 1);
+
+  el("severityBars").innerHTML = getEntriesSorted(severity).map(([k,v]) => barHTML(k, v, maxSeverity)).join("");
+  el("floorBars").innerHTML = getEntriesSorted(floor).map(([k,v]) => barHTML(k, v, maxFloor)).join("");
+  el("ruleBars").innerHTML = getEntriesSorted(rules).map(([k,v]) => barHTML(k, v, maxRules)).join("");
+  el("pairBars").innerHTML = getEntriesSorted(s.by_clash_pair_type || {}).map(([k,v]) => barHTML(k, v, maxPair)).join("");
+  el("strategyBars").innerHTML = getEntriesSorted(strategies).map(([k,v]) => barHTML(k, v, maxStrategy)).join("");
+  el("cascadeBars").innerHTML = getEntriesSorted(cascade).map(([k,v]) => barHTML(k, v, maxCascade)).join("");
+
+  const hotspots = (graph.hotspot_elements || [])
+    .map(h => `
+      <div class="mini" style="margin-bottom:10px">
+        <div class="k">Element ID</div>
+        <div class="v">${esc(h.element_id)}</div>
+        <div class="t">${esc(h.clash_count)} clashes</div>
+      </div>
+    `).join("");
+
+  el("hotspotsList").innerHTML = hotspots || `<div class="muted">No hotspot data available.</div>`;
+}
+
+function renderRules(rules) {
+  el("rulesBody").innerHTML = (rules || []).map(r => `
+    <tr>
+      <td><b>${esc(r.rule_id)}</b></td>
+      <td>${esc(r.category_a)}</td>
+      <td>${esc(r.category_b)}</td>
+      <td>${esc(r.min_clearance_mm)}</td>
+      <td>${esc(r.standard)}</td>
+      <td>${r.is_safety_critical ? '<span class="badge HIGH">Yes</span>' : '<span class="badge INFO">No</span>'}</td>
+      <td>${esc(r.rationale)}</td>
+      <td>${esc(r.escalation_note || "—")}</td>
+    </tr>
+  `).join("");
+}
+
+function renderPlaceholders() {
+  // Initial empty state: show placeholders (no data loaded).
+  el("schemaVersion").textContent = "—";
+  el("generatorName").textContent = "—";
+
+  el("summaryCards").innerHTML = [
+    metricCard("Total Clashes", "—", ""),
+    metricCard("Safety Critical", "—", ""),
+    metricCard("Escalated", "—", ""),
+    metricCard("Clash-Free Resolutions", "—", ""),
+    metricCard("Avg Penetration", "—", ""),
+    metricCard("Max Penetration", "—", ""),
+    metricCard("Clearance Rules", "—", ""),
+    metricCard("Mapped Element Types", "—", "")
+  ].join("");
+
+  el("overviewText").innerHTML = `
+    Upload a <b>JSON</b> report (or convert an <b>XML</b>) to populate this dashboard.
+  `;
+
+  el("quickStats").innerHTML = [
+    miniCard("Critical", "—", ""),
+    miniCard("High", "—", ""),
+    miniCard("Medium", "—", ""),
+    miniCard("Low", "—", ""),
+    miniCard("Info", "—", ""),
+    miniCard("Floor peak", "—", ""),
+    miniCard("Top rule", "—", ""),
+    miniCard("Largest cluster", "—", "")
+  ].join("");
+
+  el("riskStats").innerHTML = [
+    miniCard("Avg degree", "—", ""),
+    miniCard("Connected clusters", "—", ""),
+    miniCard("Spatial index elements", "—", ""),
+    miniCard("Reroute strategies", "—", ""),
+    miniCard("Cascade MEDIUM", "—", ""),
+    miniCard("Cascade HIGH", "—", ""),
+    miniCard("Cascade LOW", "—", ""),
+    miniCard("Cascade NONE", "—", "")
+  ].join("");
+
+  el("graphStats").innerHTML = [
+    miniCard("Connected clusters", "—", ""),
+    miniCard("Largest cluster size", "—", ""),
+    miniCard("Average degree", "—", ""),
+    miniCard("Hotspot elements", "—", "")
+  ].join("");
+
+  el("severityBars").innerHTML = "";
+  el("floorBars").innerHTML = "";
+  el("ruleBars").innerHTML = "";
+  el("pairBars").innerHTML = "";
+  el("strategyBars").innerHTML = "";
+  el("cascadeBars").innerHTML = "";
+
+  el("hotspotsList").innerHTML = `<div class="muted">No data loaded.</div>`;
+  el("rulesBody").innerHTML = "";
+  el("clashBody").innerHTML = "";
+  el("paginationControls").innerHTML = "";
+}
+
+function candidateTable(cands) {
+  if (!Array.isArray(cands) || !cands.length) {
+    return `<div class="muted">No candidate strategies available.</div>`;
+  }
+
+  return `
+    <div class="table-wrap" style="margin-top:10px">
+      <table style="min-width:1200px">
+        <thead>
+          <tr>
+            <th>Strategy</th>
+            <th>Label</th>
+            <th>Offset (mm)</th>
+            <th>ΔX</th>
+            <th>ΔY</th>
+            <th>ΔZ</th>
+            <th>New Position (m)</th>
+            <th>Clash Free</th>
+            <th>Score</th>
+            <th>New Clashes</th>
+            <th>Warning</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${cands.map(c => `
+            <tr>
+              <td><b>${esc(c.strategy)}</b></td>
+              <td>${esc(c.strategy_label || c.best_strategy_label || "")}</td>
+              <td>${esc(c.offset_mm ?? "—")}</td>
+              <td>${esc(c.delta_mm?.x ?? "—")}</td>
+              <td>${esc(c.delta_mm?.y ?? "—")}</td>
+              <td>${esc(c.delta_mm?.z ?? "—")}</td>
+              <td>${c.new_position_m ? `(${num(c.new_position_m.x)}, ${num(c.new_position_m.y)}, ${num(c.new_position_m.z)})` : "—"}</td>
+              <td>${c.is_clash_free ? '<span class="badge LOW">Yes</span>' : '<span class="badge HIGH">No</span>'}</td>
+              <td>${esc(c.score ?? "—")}</td>
+              <td>${esc(c.new_clashes_count ?? 0)}</td>
+              <td>${esc(c.warning || "—")}</td>
+            </tr>
+            ${Array.isArray(c.new_clashes_detail) && c.new_clashes_detail.length ? `
+              <tr>
+                <td colspan="11">
+                  <details>
+                    <summary>New clashes introduced by this candidate (${c.new_clashes_detail.length})</summary>
+                    <div style="margin-top:10px" class="table-wrap">
+                      <table style="min-width:900px">
+                        <thead>
+                          <tr>
+                            <th>Neighbour EID</th>
+                            <th>Neighbour Label</th>
+                            <th>Gap (mm)</th>
+                            <th>Required (mm)</th>
+                            <th>Rule ID</th>
+                            <th>Safety Critical</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          ${c.new_clashes_detail.map(n => `
+                            <tr>
+                              <td>${esc(n.neighbour_eid)}</td>
+                              <td>${esc(n.neighbour_label)}</td>
+                              <td>${esc(n.gap_mm)}</td>
+                              <td>${esc(n.required_mm)}</td>
+                              <td>${esc(n.rule_id)}</td>
+                              <td>${n.is_safety_critical ? '<span class="badge HIGH">Yes</span>' : '<span class="badge INFO">No</span>'}</td>
+                            </tr>
+                          `).join("")}
+                        </tbody>
+                      </table>
+                    </div>
+                  </details>
+                </td>
+              </tr>
+            ` : ""}
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function getImagePath(clashId, isThumb = false) {
+  if (!clashId) return "";
+  const match = clashId.match(/\d+$/);
+  if (!match) return "";
+  const num = parseInt(match[0], 10);
+  const paddedNum = String(num).padStart(4, '0');
+  // Assuming the images are in a fixed relative path from the HTML file
+  return `../report/all_files/cd_0_${paddedNum}.jpg`;
+}
+
+function renderClashes(allClashes) {
+  const q = (el("search").value || "").trim().toLowerCase();
+
+  const filtered = (allClashes || []).filter(c => {
+    const blob = [
+      c.clash_id,
+      c.guid,
+      c.clash_pair_label,
+      c.applicable_rule_id,
+      c.level,
+      c.grid_ref,
+      c.grid_location,
+      c.severity,
+      c.element_1?.element_id,
+      c.element_1?.name,
+      c.element_2?.element_id,
+      c.element_2?.name
+    ].filter(Boolean).join(" ").toLowerCase();
+
+    return !q || blob.includes(q);
+  });
+
+  filteredClashes = filtered;
+
+  const startIndex = (currentPage - 1) * clashesPerPage;
+  const endIndex = startIndex + clashesPerPage;
+  const paginatedClashes = filteredClashes.slice(startIndex, endIndex);
+
+  el("clashBody").innerHTML = paginatedClashes.map((c, idx) => {
+    const res = c.resolution || {};
+    const e1 = c.element_1 || {};
+    const e2 = c.element_2 || {};
+    const candidates = Array.isArray(res.all_candidates) ? res.all_candidates : [];
+    const imagePath = getImagePath(c.clash_id);
+
+    return `
+      <tr>
+        <td>
+          ${imagePath ? `<img src="${imagePath}" alt="Clash ${esc(c.clash_id)}" class="clash-image-thumb">` : ''}
+        </td>
+        <td><b>${esc(c.clash_id)}</b><br><span class="fine">${esc(c.guid || "")}</span></td>
+        <td><span class="badge ${esc(c.severity || "INFO")}">${esc(c.severity || "INFO")}</span></td>
+        <td>${esc(c.priority_score ?? "—")}</td>
+        <td>${esc(c.clash_pair_label || "—")}</td>
+        <td>${esc(c.level || "—")}</td>
+        <td>
+          <span class="tag">${esc(c.applicable_rule_id || "—")}</span><br>
+          <span class="fine">${esc(c.applicable_standard || "")}</span>
+        </td>
+        <td>${num(c.penetration_mm)}</td>
+        <td>${num(c.required_clearance_mm)}</td>
+        <td>
+          <b>${esc(res.best_strategy_label || res.best_strategy || "—")}</b><br>
+          <span class="fine">${esc(res.best_action || "")}</span>
+          ${res.cascade_risk ? `<br><span class="badge ${res.cascade_risk === "HIGH" ? "HIGH" : (res.cascade_risk === "MEDIUM" ? "MEDIUM" : "LOW")}">${esc(res.cascade_risk)} cascade risk</span>` : ""}
+        </td>
+      </tr>
+      <tr>
+        <td colspan="10">
+          <details>
+            <summary>Open full clash details</summary>
+
+            ${imagePath ? `<img src="${imagePath}" alt="Clash ${esc(c.clash_id)}" class="clash-image-large">` : ''}
+
+            <div class="detail-grid">
+              <div class="detail-box">
+                <h4>Clash identification</h4>
+                <p class="kv">
+                  <span><b>Clash ID:</b> ${esc(c.clash_id)}</span>
+                  <span><b>GUID:</b> ${esc(c.guid)}</span>
+                  <span><b>Created:</b> ${esc(c.created_date || "—")}</span>
+                  <span><b>Grid:</b> ${esc(c.grid_location || "—")}</span>
+                  <span><b>Grid ref:</b> ${esc(c.grid_ref || "—")}</span>
+                  <span><b>Level:</b> ${esc(c.level || "—")}</span>
+                </p>
+              </div>
+
+              <div class="detail-box">
+                <h4>Clash metrics</h4>
+                <p class="kv">
+                  <span><b>Severity:</b> ${esc(c.severity || "—")}</span>
+                  <span><b>Priority score:</b> ${esc(c.priority_score ?? "—")}</span>
+                  <span><b>Penetration:</b> ${num(c.penetration_mm)} mm</span>
+                  <span><b>Required clearance:</b> ${num(c.required_clearance_mm)} mm</span>
+                  <span><b>Safety critical:</b> ${c.is_safety_critical ? "Yes" : "No"}</span>
+                  <span><b>Escalation note:</b> ${esc(c.escalation_note || "—")}</span>
+                </p>
+              </div>
+
+              <div class="detail-box">
+                <h4>Clash point</h4>
+                <p class="kv">
+                  <span><b>X:</b> ${num(c.clash_point_xyz?.x)}</span>
+                  <span><b>Y:</b> ${num(c.clash_point_xyz?.y)}</span>
+                  <span><b>Z:</b> ${num(c.clash_point_xyz?.z)}</span>
+                </p>
+              </div>
+
+              <div class="detail-box">
+                <h4>Resolution summary</h4>
+                <p class="kv">
+                  <span><b>Element to reroute:</b> ${esc(res.element_to_reroute || "—")}</span>
+                  <span><b>Type label:</b> ${esc(res.element_type_label || "—")}</span>
+                  <span><b>Best strategy:</b> ${esc(res.best_strategy || "—")}</span>
+                  <span><b>Best strategy label:</b> ${esc(res.best_strategy_label || "—")}</span>
+                  <span><b>Best offset:</b> ${num(res.best_offset_mm)} mm</span>
+                  <span><b>Fully clash free:</b> ${res.is_fully_clash_free ? "Yes" : "No"}</span>
+                </p>
+              </div>
+
+              <div class="detail-box">
+                <h4>Element 1</h4>
+                <p class="kv">
+                  <span><b>Element ID:</b> ${esc(e1.element_id || "—")}</span>
+                  <span><b>Name:</b> ${esc(e1.name || "—")}</span>
+                  <span><b>Layer:</b> ${esc(e1.layer || "—")}</span>
+                  <span><b>Category:</b> ${esc(e1.category || "—")}</span>
+                  <span><b>Sub-type:</b> ${esc(e1.sub_type || "—")}</span>
+                  <span><b>Medium:</b> ${esc(e1.medium || "—")}</span>
+                  <span><b>System label:</b> ${esc(e1.system_label || "—")}</span>
+                </p>
+              </div>
+
+              <div class="detail-box">
+                <h4>Element 2</h4>
+                <p class="kv">
+                  <span><b>Element ID:</b> ${esc(e2.element_id || "—")}</span>
+                  <span><b>Name:</b> ${esc(e2.name || "—")}</span>
+                  <span><b>Layer:</b> ${esc(e2.layer || "—")}</span>
+                  <span><b>Category:</b> ${esc(e2.category || "—")}</span>
+                  <span><b>Sub-type:</b> ${esc(e2.sub_type || "—")}</span>
+                  <span><b>Medium:</b> ${esc(e2.medium || "—")}</span>
+                  <span><b>System label:</b> ${esc(e2.system_label || "—")}</span>
+                </p>
+              </div>
+            </div>
+
+            <h3>All candidate strategies</h3>
+            ${candidateTable(candidates)}
+          </details>
+        </td>
+      </tr>
+    `;
+  }).join("");
+}
+
+function renderPaginationControls() {
+  const totalPages = Math.ceil(filteredClashes.length / clashesPerPage);
+  const controls = el("paginationControls");
+
+  if (totalPages <= 1) {
+    controls.innerHTML = "";
+    return;
+  }
+
+  controls.innerHTML = `
+    <button id="prevPage" ${currentPage === 1 ? 'disabled' : ''}>Previous</button>
+    <span>Page ${currentPage} of ${totalPages}</span>
+    <button id="nextPage" ${currentPage === totalPages ? 'disabled' : ''}>Next</button>
+  `;
+
+  el("prevPage").addEventListener("click", () => {
+    if (currentPage > 1) {
+      currentPage--;
+      renderClashes(rawData.classified_clashes || []);
+    }
+  });
+
+  el("nextPage").addEventListener("click", () => {
+    if (currentPage < totalPages) {
+      currentPage++;
+      renderClashes(rawData.classified_clashes || []);
+    }
+  });
+}
+
+function loadData(data) {
+  rawData = data;
+  currentPage = 1;
+
+  renderMeta(data);
+  renderOverview(data);
+  renderRules(data.clearance_rules_reference || []);
+  renderClashes(data.classified_clashes || []);
+
+  el("fileNote").innerHTML = `
+    Loaded <b>${esc(data.source_file || "JSON file")}</b> successfully. 
+    The report contains <b>${esc(data.summary?.total_clashes ?? "—")}</b> clashes, 
+    <b>${esc(data.summary?.safety_critical_count ?? "—")}</b> safety-critical clashes, 
+    and <b>${esc(data.summary?.escalated_count ?? "—")}</b> escalated clashes.
+  `;
+}
+
+function triggerDownload(filename, content, mimeType) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function showTxtDownload() {
+  el("topRightActions").style.display = "block";
+}
+
+async function loadFromUrl(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to fetch ${url}: ${res.status} ${res.statusText}`);
+  const data = await res.json();
+  loadData(data);
+}
+
+function setupTabs() {
+  const tabButtons = document.querySelectorAll(".tab-btn");
+  const tabContents = document.querySelectorAll(".tab-content");
+
+  tabButtons.forEach(button => {
+    button.addEventListener("click", () => {
+      const tab = button.dataset.tab;
+
+      tabButtons.forEach(btn => btn.classList.remove("active"));
+      button.classList.add("active");
+
+      tabContents.forEach(content => {
+        if (content.id === tab) {
+          content.classList.add("active");
+        } else {
+          content.classList.remove("active");
+        }
+      });
+    });
+  });
+}
+
+el("loadBtn").addEventListener("click", async () => {
+  const file = el("fileInput").files?.[0];
+  if (!file) {
+    alert("Choose a JSON file first.");
+    return;
+  }
+  const text = await file.text();
+  loadData(JSON.parse(text));
+});
+
+el("fileInput").addEventListener("change", async () => {
+  const file = el("fileInput").files?.[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    loadData(JSON.parse(text));
+  } catch (err) {
+    console.error("Failed to load JSON:", err);
+    alert("Could not read that JSON file.\n\n" + String(err));
+  }
+});
+
+el("demoBtn").addEventListener("click", async () => {
+  try {
+    await loadFromUrl("clash_rule_engine_report.json");
+  } catch (err) {
+    alert(
+      "Could not load clash_rule_engine_report.json automatically.\n\n" +
+      "Either serve this HTML and the JSON from the same folder, or upload the JSON file using the chooser.\n\n" +
+      String(err)
+    );
+  }
+});
+
+el("convertBtn").addEventListener("click", async () => {
+  const xmlFile = el("xmlInput").files?.[0];
+  if (!xmlFile) {
+    alert("Choose an XML file first.");
+    return;
+  }
+
+  el("fileNote").innerHTML = `Converting <b>${esc(xmlFile.name)}</b> … this can take a minute for large clash sets.`;
+
+  try {
+    const form = new FormData();
+    form.append("file", xmlFile, xmlFile.name);
+
+    const res = await fetch(STAGE4_CONVERT_ENDPOINT, {
+      method: "POST",
+      body: form,
+    });
+
+    if (!res.ok) {
+      let details = "";
+      try {
+        details = await res.text();
+      } catch (_) {
+        details = "";
+      }
+      let message = `HTTP ${res.status} ${res.statusText}`;
+      if (details) message += `\n\n${details}`;
+      throw new Error(message);
+    }
+
+    const data = await res.json();
+
+    const baseName = xmlFile.name.replace(/\.xml$/i, "") || "clash_rule_engine_report";
+
+    // Download JSON on the frontend.
+    const jsonText = JSON.stringify(data, null, 2);
+    triggerDownload(`${baseName}.json`, jsonText, "application/json");
+
+    // Also load the report immediately.
+    loadData(data);
+
+    // Show the top-right script download button only after conversion.
+    showTxtDownload();
+  } catch (err) {
+    console.error("XML conversion failed:", err);
+    el("fileNote").innerHTML = `
+      <b>XML conversion failed.</b>
+      Make sure the converter API is running: <code>python stages/xml_to_json_api.py</code><br/>
+      <span class="muted">${esc(String(err))}</span>
+    `;
+    alert(
+      "Could not convert the XML.\n\n" +
+      "Start the converter API in another terminal:\n" +
+      "  python stages/xml_to_json_api.py\n\n" +
+      String(err)
+    );
+  }
+});
+
+el("downloadTxtBtn").addEventListener("click", async () => {
+  try {
+    const res = await fetch(REROUTER_SCRIPT_ENDPOINT);
+    if (!res.ok) {
+      const details = await res.text().catch(() => "");
+      throw new Error(`HTTP ${res.status} ${res.statusText}${details ? `\n\n${details}` : ""}`);
+    }
+    const text = await res.text();
+    triggerDownload("bim_auto_rerouter_v5_1.txt", text, "text/plain;charset=utf-8");
+  } catch (err) {
+    console.error("Script download failed:", err);
+    alert(
+      "Could not download the script.\n\n" +
+      "Make sure the converter API is running:\n" +
+      "  python stages/xml_to_json_api.py\n\n" +
+      String(err)
+    );
+  }
+});
+
+el("search").addEventListener("input", () => {
+  if (!rawData) return;
+  currentPage = 1;
+  renderClashes(rawData.classified_clashes || []);
+});
+
+function setupChatbot() {
+  const toggleButton = el("chatbot-toggle");
+  const chatWindow = el("chatbot-window");
+  const messagesContainer = el("chatbot-messages");
+  const input = el("chatbot-input");
+  const sendButton = el("chatbot-send");
+
+  toggleButton.addEventListener("click", () => {
+    const isHidden = chatWindow.style.display === "none" || chatWindow.style.display === "";
+    chatWindow.style.display = isHidden ? "flex" : "none";
+  });
+
+  const sendMessage = async () => {
+    const question = input.value.trim();
+    if (!question) return;
+
+    if (!rawData) {
+      alert("Please load the report data before asking questions.");
+      return;
+    }
+
+    addMessage(question, "user");
+    input.value = "";
+    addMessage("Thinking...", "loading");
+
+    try {
+      const response = await fetch("http://127.0.0.1:5001/ask", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          question: question,
+          context: rawData, // Send the entire JSON data as context
+        }),
+      });
+
+      // Remove the "Thinking..." message
+      const loadingMessage = messagesContainer.querySelector('.loading-message');
+      if (loadingMessage) {
+        messagesContainer.removeChild(loadingMessage.parentNode);
+      }
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+      addMessage(result.answer, "bot");
+
+    } catch (error) {
+      console.error("Error asking chatbot:", error);
+      const loadingMessage = messagesContainer.querySelector('.loading-message');
+      if (loadingMessage) {
+        messagesContainer.removeChild(loadingMessage.parentNode);
+      }
+      addMessage("Sorry, I couldn't get an answer. Please check the console for errors.", "bot");
+    }
+  };
+
+  sendButton.addEventListener("click", sendMessage);
+  input.addEventListener("keypress", (e) => {
+    if (e.key === "Enter") {
+      sendMessage();
+    }
+  });
+
+  function addMessage(text, type) {
+    const messageWrapper = document.createElement('div');
+    const messageElement = document.createElement("div");
+    messageElement.classList.add("chat-message", `${type}-message`);
+    messageElement.textContent = text;
+    messageWrapper.appendChild(messageElement);
+    messagesContainer.appendChild(messageWrapper);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+  }
+}
+
+
+window.addEventListener("DOMContentLoaded", async () => {
+  setupTabs();
+  setupChatbot();
+  renderPlaceholders();
+});
+</script>
+</body>
+</html>
